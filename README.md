@@ -12,8 +12,8 @@
   <a href="https://app.codecov.io/gh/rpamis/comet/tree/master"><img alt="codecov" src="https://img.shields.io/codecov/c/github/rpamis/comet/master?style=flat-square&label=coverage&color=%23E61A7A" /></a>
   <a href="https://deepwiki.com/rpamis/comet"><img alt="DeepWiki" src="https://img.shields.io/badge/DeepWiki-rpamis%2Fcomet-blue?style=flat-square" /></a>
   <a href="https://www.npmjs.com/package/@rpamis/comet"><img alt="npm version" src="https://img.shields.io/npm/v/@rpamis/comet?style=flat-square" /></a>
-  <a href="https://www.npmjs.com/package/@rpamis/comet"><img alt="npm download count" src="https://img.shields.io/npm/dm/@rpamis/comet?style=flat-square&label=Downloads/mo" /></a>
-  <a href="https://www.npmjs.com/package/@rpamis/comet"><img alt="npm weekly download count" src="https://img.shields.io/npm/dw/@rpamis/comet?style=flat-square&label=Downloads/wk" /></a>
+  <a href="https://www.npmjs.com/package/@rpamis/comet"><img alt="npm total download count" src="https://img.shields.io/npm/dt/@rpamis/comet?style=flat-square&label=Downloads" /></a>
+  <a href="https://www.npmjs.com/package/@rpamis/comet"><img alt="npm monthly download count" src="https://img.shields.io/npm/dm/@rpamis/comet?style=flat-square&label=Downloads/mo" /></a>
   <a href="https://docs.comet.rpamis.com/"><img alt="Comet Docs" src="https://img.shields.io/badge/Docs-docs.comet.rpamis.com-FFD700?style=flat-square" /></a>
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" /></a>
   <a href="https://atomgit.com/rpamis/comet"><img alt="AtomGitStars" src="https://atomgit.com/rpamis/comet/star/badge.svg" /></a>
@@ -301,6 +301,9 @@ diagnostics. `comet doctor` reports diagnostic status for malformed `.comet.yaml
 for valid changes, and runtime evidence gaps that block safe resume. In a Git secondary worktree, it separately reports
 the current worktree, primary worktree, and global fallback installation state. Ignored assets in the primary worktree
 are inspected only for classification and are never executed across worktrees.
+CodeGraph diagnostics separately report whether the CLI is installed, whether the current project index is current, whether
+MCP is registered with a supported Agent, and whether each Agent has effective capability; a healthy project index does not
+mean that an Agent has CodeGraph MCP registration.
 
 | Option            | Description                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------------------- |
@@ -468,7 +471,7 @@ does not expand the backend command list; see the [Skill creation guide](docs/op
 
 ## Supported Platforms
 
-`comet init` supports 34 AI coding platforms:
+`comet init` supports 35 AI coding platforms:
 
 <details>
 <summary>View full platform list</summary>
@@ -492,6 +495,7 @@ does not expand the backend command list; see the [Skill creation guide](docs/op
 | ForgeCode          | `.forge/`     | Trae          | `.trae/`     |
 | Trae CN            | `.trae-cn/`   | ZCode         | `.zcode/`    |
 | MimoCode           | `.mimocode/`  | CoStrict      | `.cospec/`   |
+| Grok               | `.grok/`      |               |              |
 
 </details>
 

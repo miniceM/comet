@@ -12,8 +12,8 @@
   <a href="https://app.codecov.io/gh/rpamis/comet/tree/master"><img alt="codecov" src="https://img.shields.io/codecov/c/github/rpamis/comet/master?style=flat-square&label=coverage&color=%23E61A7A" /></a>
   <a href="https://deepwiki.com/rpamis/comet"><img alt="DeepWiki" src="https://img.shields.io/badge/DeepWiki-rpamis%2Fcomet-blue?style=flat-square" /></a>
   <a href="https://www.npmjs.com/package/@rpamis/comet"><img alt="npm version" src="https://img.shields.io/npm/v/@rpamis/comet?style=flat-square" /></a>
-  <a href="https://www.npmjs.com/package/@rpamis/comet"><img alt="npm download count" src="https://img.shields.io/npm/dm/@rpamis/comet?style=flat-square&label=Downloads/mo" /></a>
-  <a href="https://www.npmjs.com/package/@rpamis/comet"><img alt="npm weekly download count" src="https://img.shields.io/npm/dw/@rpamis/comet?style=flat-square&label=Downloads/wk" /></a>
+  <a href="https://www.npmjs.com/package/@rpamis/comet"><img alt="npm total download count" src="https://img.shields.io/npm/dt/@rpamis/comet?style=flat-square&label=Downloads" /></a>
+  <a href="https://www.npmjs.com/package/@rpamis/comet"><img alt="npm monthly download count" src="https://img.shields.io/npm/dm/@rpamis/comet?style=flat-square&label=Downloads/mo" /></a>
   <a href="https://docs.comet.rpamis.com/"><img alt="Comet Docs" src="https://img.shields.io/badge/Docs-docs.comet.rpamis.com-FFD700?style=flat-square" /></a>
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" /></a>
   <a href="https://atomgit.com/rpamis/comet"><img alt="AtomGitStars" src="https://atomgit.com/rpamis/comet/star/badge.svg" /></a>
@@ -280,6 +280,7 @@ Comet Eval的自动化双Agent架构能够在线上与LangSmith/LangFuse环境�
 
 检查项目级/全局安装、工作目录、已安装技能、脚本、CodeGraph 索引，以及活跃 change 的诊断信息。`comet doctor` 会对畸形
 `.comet.yaml` 报告 diagnostic 状态，对有效 change 报告 current step / runtime mode，并指出哪些运行时证据缺失导致无法安全恢复。在 Git secondary worktree 中，它会分别报告当前 worktree、primary worktree 与 global fallback 的安装状态；primary 中被忽略的资产只用于分类，不会跨 worktree 执行。
+CodeGraph 诊断会分别展示 CLI 是否已安装、当前项目索引是否最新、MCP 是否已注册到受支持的 Agent，以及每个 Agent 是否真正具备有效能力；项目索引正常不代表某个 Agent 已注册 MCP。
 
 | 选项              | 描述                                                                         |
 | ----------------- | ---------------------------------------------------------------------------- |
@@ -439,7 +440,7 @@ comet eval ./my-skill --suite langsmith --html
 
 ## 支持平台
 
-`comet init` 支持 34 个 AI 编码平台：
+`comet init` 支持 35 个 AI 编码平台：
 
 <details>
 <summary>查看完整平台列表</summary>
@@ -463,6 +464,7 @@ comet eval ./my-skill --suite langsmith --html
 | ForgeCode          | `.forge/`     | Trae          | `.trae/`     |
 | Trae CN            | `.trae-cn/`   | ZCode         | `.zcode/`    |
 | MimoCode           | `.mimocode/`  | CoStrict      | `.cospec/`   |
+| Grok               | `.grok/`      |               |              |
 
 </details>
 
