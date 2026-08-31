@@ -69,6 +69,10 @@
       "hookRouter": "assets/skills/comet/scripts/comet-hook-router.mjs"
     }
   },
+  "enterpriseGuardRuntime": {
+    "entry": "domains/enterprise-guard/enterprise-hook-entry.ts",
+    "output": "assets/skills/comet/scripts/comet-enterprise-hook.mjs"
+  },
   "allowedTopLevelEntries": [
     ".agents",
     ".claude",
@@ -130,6 +134,7 @@
     "comet-native",
     "dashboard",
     "engine",
+    "enterprise-guard",
     "eval",
     "factory",
     "integrations",

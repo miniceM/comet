@@ -3026,6 +3026,7 @@ describe('update command helpers', () => {
     ) as { keep: string; hooks: { PreToolUse: Array<{ hooks: Array<{ command: string }> }> } };
     expect(settings.keep).toBe('classic hook');
     expect(JSON.stringify(settings.hooks)).toContain('comet-hook-router.mjs');
+    expect(JSON.stringify(settings.hooks)).toContain('comet-enterprise-hook.mjs');
     expect(JSON.stringify(settings.hooks)).not.toContain('comet-native-hook-guard.mjs');
     const agents = await fs.readFile(path.join(tmpDir, 'AGENTS.md'), 'utf8');
     const claude = await fs.readFile(path.join(tmpDir, 'CLAUDE.md'), 'utf8');

@@ -1,6 +1,6 @@
 {
   "name": "@rpamis/comet",
-  "version": "0.4.0-beta.20",
+  "version": "0.4.0-beta.21",
   "description": "Agent Skill Harness For Turning Ideas Into Evaluated Workflows",
   "keywords": [
     "comet",
@@ -52,7 +52,8 @@
     "build:classic-runtime": "node scripts/build/build-classic-runtime.mjs",
     "build:native-runtime": "node scripts/build/build-native-runtime.mjs",
     "build:entry-runtime": "node scripts/build/build-entry-runtime.mjs",
-    "check:generated": "node scripts/build/build-classic-runtime.mjs --check && node scripts/build/build-native-runtime.mjs --check && node scripts/build/build-entry-runtime.mjs --check",
+    "build:enterprise-guard-runtime": "node scripts/build/build-enterprise-guard-runtime.mjs",
+    "check:generated": "node scripts/build/build-classic-runtime.mjs --check && node scripts/build/build-native-runtime.mjs --check && node scripts/build/build-entry-runtime.mjs --check && node scripts/build/build-enterprise-guard-runtime.mjs --check",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:native-parallel": "vitest run test/domains/comet-native/native-parallel-worktree.test.ts",

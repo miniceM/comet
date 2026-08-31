@@ -2,6 +2,17 @@
 
 All notable changes to @rpamis/comet will be documented in this file.
 
+## What's Changed [0.4.0-beta.21] - 2026-08-28
+
+### Added
+
+- **Enterprise Guard for Claude Code**: `comet init` and `comet update` now install an independent managed `PreToolUse` Hook that blocks approved high-risk writes, embedded credentials or private keys, filesystem-root recursive deletion, and force-push commands without changing the existing Hook Router workflow behavior. `comet doctor --repair` restores a missing Guard entry, and a full `comet uninstall` removes only Comet's Guard entry while preserving user and Router hooks.
+
+### Fixed
+
+- **macOS worktree and uninstall paths**: Hook worktree routing and uninstall reports now reconcile macOS logical and physical temporary paths, so linked worktree selection remains correct and preserved-content messages use the path supplied by the user.
+- **Read-only trust anchors**: Filesystem read-only mount responses now count as non-writable during trusted-file verification instead of aborting the capability check.
+
 ## What's Changed [0.4.0-beta.20] - 2026-08-27
 
 ### Changed

@@ -35,6 +35,8 @@ const __dirname = path.dirname(__filename);
 type HookConfig = {
   matcher: string;
   description: string;
+  /** Fixed command arguments owned by the Hook bundle, not user input. */
+  arguments?: string[];
 };
 
 type Manifest = {
@@ -59,6 +61,7 @@ const NATIVE_SHARED_SKILL_PATHS = new Set([
   'comet-review/SKILL.md',
   'comet-review/agents/openai.yaml',
   'comet/scripts/comet-entry-runtime.mjs',
+  'comet/scripts/comet-enterprise-hook.mjs',
   'comet/scripts/comet-hook-router.mjs',
 ]);
 const RETIRED_COMET_OWNED_SKILL_PATHS = [
@@ -447,6 +450,7 @@ async function prepareNativeSkillInstallTarget(
       (relativePath) =>
         relativePath === 'comet/SKILL.md' ||
         relativePath === 'comet/scripts/comet-entry-runtime.mjs' ||
+        relativePath === 'comet/scripts/comet-enterprise-hook.mjs' ||
         relativePath === 'comet/scripts/comet-hook-router.mjs' ||
         relativePath.startsWith('comet-any/') ||
         relativePath.startsWith('comet-native/'),
@@ -1079,7 +1083,8 @@ ${content}`;
 }
 
 /**
- * Install Comet hooks for platforms that support them.
+ * Install an owner's Hooks for platforms that support them. Ownership is the
+ * declared script path: only matching commands are replaced during reconcile.
  * Supports multiple hook formats:
  *   'claude-code' — Claude-shaped JSON with PreToolUse array; defaults to settings.local.json,
  *                   with platform metadata able to override the filename
@@ -1092,11 +1097,12 @@ ${content}`;
  *   'kiro' — hooks/*.kiro.hook JSON files
  *   'trae' — hooks.json with version and PreToolUse grouped command hooks
  */
-async function installCometHooksForPlatform(
+async function installManagedHooksForPlatform(
   baseDir: string,
   platform: Platform,
   scope: InstallScope = 'project',
-  workflowSelection: InitWorkflowSelection = 'classic',
+  hooksConfig: Record<string, HookConfig>,
+  options: { allowGlobal?: boolean } = {},
 ): Promise<HookInstallResult> {
   if (!platform.supportsHooks) {
     return { status: 'skipped', reason: 'platform does not support hooks' };
@@ -1108,20 +1114,18 @@ async function installCometHooksForPlatform(
     };
   }
 
-  if (scope === 'global' && platform.hookFormat !== 'trae') {
+  if (scope === 'global' && platform.hookFormat !== 'trae' && !options.allowGlobal) {
     return {
       status: 'skipped',
       reason: 'blocking Hooks are project-scoped',
     };
   }
 
-  try {
-    const manifest = await readManifest();
-    const hooksConfig = managedHooksForSelection(manifest, workflowSelection);
-    if (!hooksConfig || Object.keys(hooksConfig).length === 0) {
-      return { status: 'skipped', reason: 'no hooks defined in manifest' };
-    }
+  if (Object.keys(hooksConfig).length === 0) {
+    return { status: 'skipped', reason: 'no Hooks defined for owner' };
+  }
 
+  try {
     const hookFormat = platform.hookFormat;
     const skillsDir = getPlatformSkillsDir(platform, scope);
     const platformBase = path.join(baseDir, getPlatformConfigDir(platform, scope));
@@ -1216,6 +1220,26 @@ async function installCometHooksForPlatform(
   }
 }
 
+/** Install the workflow Router Hook declared by the packaged Comet manifest. */
+async function installCometHooksForPlatform(
+  baseDir: string,
+  platform: Platform,
+  scope: InstallScope = 'project',
+  workflowSelection: InitWorkflowSelection = 'classic',
+): Promise<HookInstallResult> {
+  try {
+    const manifest = await readManifest();
+    return await installManagedHooksForPlatform(
+      baseDir,
+      platform,
+      scope,
+      managedHooksForSelection(manifest, workflowSelection),
+    );
+  } catch (err) {
+    return { status: 'failed', reason: (err as Error).message };
+  }
+}
+
 function quoteCommandArg(value: string): string {
   return `"${value.replaceAll('\\', '/').replaceAll('"', '\\"')}"`;
 }
@@ -1226,6 +1250,7 @@ function buildHookCommand(
   skillsDir: string,
   scriptRelPath: string,
   context?: HookCommandContext,
+  commandArgs: readonly string[] = [],
 ): string {
   const projectRoot = path.resolve(baseDir);
   const scriptPath = path.join(projectRoot, skillsDir, 'skills', ...scriptRelPath.split('/'));
@@ -1235,9 +1260,9 @@ function buildHookCommand(
     if (context.scope === 'project') {
       command += ` --project-root ${quoteCommandArg(projectRoot)}`;
     }
-    return command;
+    return `${command}${commandArgs.map((arg) => ` ${quoteCommandArg(arg)}`).join('')}`;
   }
-  return `${command} --project-root ${quoteCommandArg(projectRoot)}`;
+  return `${command} --project-root ${quoteCommandArg(projectRoot)}${commandArgs.map((arg) => ` ${quoteCommandArg(arg)}`).join('')}`;
 }
 
 function parseCommandTokens(command: string): string[] | undefined {
@@ -1483,7 +1508,7 @@ async function installClaudeCodeHooks(
   // Group by matcher so hooks sharing the same matcher are merged
   const matcherGroups: Record<string, Array<{ type: string; command: string }>> = {};
   for (const [scriptRelPath, config] of Object.entries(hooksConfig)) {
-    const command = buildHookCommand(baseDir, skillsDir, scriptRelPath, context);
+    const command = buildHookCommand(baseDir, skillsDir, scriptRelPath, context, config.arguments);
     const matcher = resolveInstalledHookMatcher(context, config.matcher);
     if (!matcherGroups[matcher]) {
       matcherGroups[matcher] = [];
@@ -1536,7 +1561,7 @@ async function installQwenStyleHooks(
     }
     matcherGroups[config.matcher].push({
       type: 'command',
-      command: buildHookCommand(baseDir, skillsDir, scriptRelPath, context),
+      command: buildHookCommand(baseDir, skillsDir, scriptRelPath, context, config.arguments),
       description: config.description,
     });
   }
@@ -1586,7 +1611,7 @@ async function installGeminiHooks(
       hooks: [
         {
           type: 'command',
-          command: buildHookCommand(baseDir, skillsDir, scriptRelPath, context),
+          command: buildHookCommand(baseDir, skillsDir, scriptRelPath, context, config.arguments),
           name: config.description,
         },
       ],
@@ -1620,9 +1645,9 @@ async function installWindsurfHooks(
   const hooksPath = path.join(platformBase, 'hooks.json');
 
   const entries: Array<{ command: string; show_output: boolean }> = [];
-  for (const [scriptRelPath] of Object.entries(hooksConfig)) {
+  for (const [scriptRelPath, config] of Object.entries(hooksConfig)) {
     entries.push({
-      command: buildHookCommand(baseDir, skillsDir, scriptRelPath, context),
+      command: buildHookCommand(baseDir, skillsDir, scriptRelPath, context, config.arguments),
       show_output: true,
     });
   }
@@ -1666,7 +1691,7 @@ async function installTraeHooks(
     matcherGroups[config.matcher] ??= [];
     matcherGroups[config.matcher].push({
       type: 'command',
-      command: buildHookCommand(baseDir, skillsDir, scriptRelPath, context),
+      command: buildHookCommand(baseDir, skillsDir, scriptRelPath, context, config.arguments),
       timeout: 30,
     });
   }
@@ -1707,7 +1732,7 @@ async function installCopilotHooks(
 
   const scriptEntries: Array<{ matcher: string; bash: string; powershell: string }> = [];
   for (const [scriptRelPath, config] of Object.entries(hooksConfig)) {
-    const cmd = buildHookCommand(baseDir, skillsDir, scriptRelPath, context);
+    const cmd = buildHookCommand(baseDir, skillsDir, scriptRelPath, context, config.arguments);
     const matcher =
       config.matcher === 'Write|Edit'
         ? 'create|edit|str_replace_editor|apply_patch'
@@ -1797,7 +1822,7 @@ async function installKiroHooks(
       },
       then: {
         type: 'runCommand',
-        command: buildHookCommand(baseDir, skillsDir, scriptRelPath, context),
+        command: buildHookCommand(baseDir, skillsDir, scriptRelPath, context, config.arguments),
       },
     };
 
@@ -2133,6 +2158,7 @@ export {
   copyCometSkillsForPlatform,
   copyCometRulesForPlatform,
   installCometHooksForPlatform,
+  installManagedHooksForPlatform,
   readManifest,
   getManagedSkillPaths,
   getManagedSkillPathsForSelection,
@@ -2158,4 +2184,4 @@ export {
   removeRetiredCometOwnedSkillPaths,
   RETIRED_COMET_OWNED_SKILL_PATHS,
 };
-export type { Manifest, LanguageConfig, PlannedSkillFile, PlannedSkillSourceFile };
+export type { HookConfig, Manifest, LanguageConfig, PlannedSkillFile, PlannedSkillSourceFile };

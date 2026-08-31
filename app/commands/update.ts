@@ -24,6 +24,7 @@ import {
   reconcileCometHooksForPlatform,
   reconcileProjectCometHooksForPlatform,
 } from '../../domains/skill/hook-lifecycle.js';
+import { installEnterpriseGuard } from '../../domains/enterprise-guard/hook-lifecycle.js';
 import { removeLegacyCometSkillsForPlatform } from '../../domains/skill/uninstall.js';
 import { syncCometProjectInstructions } from '../../domains/skill/project-instructions.js';
 import {
@@ -1792,6 +1793,21 @@ async function updateSingleProject(
         reason,
       });
       log(`  Comet hooks -> ${target.platform.name}: ${t(lang, 'hooksFailed')} (${reason})`);
+    }
+
+    try {
+      const enterpriseResult = await installEnterpriseGuard(baseDir, target.platform, target.scope);
+      if (enterpriseResult.status === 'failed') {
+        totalHooksFailed++;
+        log(
+          `  Enterprise Guard -> ${target.platform.name}: ${t(lang, 'hooksFailed')} (${enterpriseResult.reason})`,
+        );
+      }
+    } catch (err) {
+      totalHooksFailed++;
+      log(
+        `  Enterprise Guard -> ${target.platform.name}: ${t(lang, 'hooksFailed')} (${(err as Error).message})`,
+      );
     }
   }
 

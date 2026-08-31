@@ -33,6 +33,7 @@ import {
   reconcileCometHooksForPlatform,
   reconcileProjectCometHooksForPlatform,
 } from '../../domains/skill/hook-lifecycle.js';
+import { installEnterpriseGuard } from '../../domains/enterprise-guard/hook-lifecycle.js';
 import { syncCometProjectInstructions } from '../../domains/skill/project-instructions.js';
 import { LANGUAGES, type LanguageConfig } from '../../domains/skill/languages.js';
 import { resolveInitWorkflow } from '../../domains/comet-entry/init-workflow.js';
@@ -973,6 +974,36 @@ export async function initCommand(
         });
         log(
           `  Comet hooks -> ${platform.name}: ${t(lang, 'hooksFailed')} (${(err as Error).message})`,
+        );
+      }
+    }
+
+    if (cmAction !== 'skip' && !skillFailed) {
+      try {
+        const enterpriseResult = await installEnterpriseGuard(baseDir, platform, scope);
+        cometComponentInstalled ||= enterpriseResult.status === 'installed';
+        if (enterpriseResult.status === 'failed') {
+          cmStatus = 'failed';
+          platformFailures.push({
+            platform: platform.id,
+            platformName: platform.name,
+            component: 'Hook',
+            reason: enterpriseResult.reason ?? 'Enterprise Guard Hook installation failed',
+          });
+          log(
+            `  Enterprise Guard -> ${platform.name}: ${t(lang, 'hooksFailed')} (${enterpriseResult.reason})`,
+          );
+        }
+      } catch (err) {
+        cmStatus = 'failed';
+        platformFailures.push({
+          platform: platform.id,
+          platformName: platform.name,
+          component: 'Hook',
+          reason: (err as Error).message,
+        });
+        log(
+          `  Enterprise Guard -> ${platform.name}: ${t(lang, 'hooksFailed')} (${(err as Error).message})`,
         );
       }
     }

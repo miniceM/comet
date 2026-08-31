@@ -10,6 +10,7 @@ import {
   copyCometRulesForPlatform,
   installCometHooksForPlatform,
 } from '../../domains/skill/platform-install.js';
+import { installEnterpriseGuard } from '../../domains/enterprise-guard/hook-lifecycle.js';
 import { PLATFORMS } from '../../platform/install/platforms.js';
 import {
   readCometCurrentSelection,
@@ -1369,6 +1370,12 @@ describe('doctor command', () => {
         message: expect.stringContaining('comet update --scope project'),
       },
     );
+    expect(
+      results.find((result) => result.check === 'enterprise guard: Claude Code (project)'),
+    ).toMatchObject({
+      status: 'warn',
+      message: expect.stringContaining('comet doctor --repair --scope project'),
+    });
   });
 
   it('passes Rule and Hook checks when the managed components are installed', async () => {
@@ -1377,6 +1384,7 @@ describe('doctor command', () => {
     await installManagedCometSkills(tmpDir);
     await copyCometRulesForPlatform(tmpDir, claude!, true, 'zh', 'project');
     await installCometHooksForPlatform(tmpDir, claude!, 'project');
+    await installEnterpriseGuard(tmpDir, claude!, 'project');
 
     const results = await collectDoctorResults(tmpDir);
 
@@ -1390,6 +1398,9 @@ describe('doctor command', () => {
         status: 'pass',
       },
     );
+    expect(
+      results.find((result) => result.check === 'enterprise guard: Claude Code (project)'),
+    ).toMatchObject({ status: 'pass' });
   });
 
   it.each([
@@ -1453,6 +1464,9 @@ describe('doctor command', () => {
     expect(
       after.find((result) => result.check === 'hook runtime: Claude Code (project)'),
     ).toMatchObject({ status: 'pass', message: 'current' });
+    expect(
+      after.find((result) => result.check === 'enterprise guard: Claude Code (project)'),
+    ).toMatchObject({ status: 'pass' });
   });
 
   it('uses the Classic-only project language when repairing managed Rules', async () => {

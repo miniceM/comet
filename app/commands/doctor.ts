@@ -28,6 +28,10 @@ import {
   reconcileProjectCometHooksForPlatform,
 } from '../../domains/skill/hook-lifecycle.js';
 import {
+  inspectEnterpriseGuard,
+  installEnterpriseGuard,
+} from '../../domains/enterprise-guard/hook-lifecycle.js';
+import {
   getPlatformRuleDestinations,
   getLegacyPlatformRuleDestinations,
   inspectCometHooksForPlatform,
@@ -790,6 +794,24 @@ async function checkHookComponents(
     scope,
     workflowSelection,
   );
+  const enterpriseInspection = await inspectEnterpriseGuard(baseDir, platform, scope);
+  if (platform.id === 'claude') {
+    results.push({
+      check: `enterprise guard: ${platform.name} (${scope})`,
+      status:
+        enterpriseInspection.present &&
+        !enterpriseInspection.error &&
+        !enterpriseInspection.duplicatePresent
+          ? 'pass'
+          : 'warn',
+      message:
+        enterpriseInspection.present &&
+        !enterpriseInspection.error &&
+        !enterpriseInspection.duplicatePresent
+          ? 'exactly one managed Enterprise Guard Hook present'
+          : `${enterpriseInspection.error ?? 'managed Enterprise Guard Hook missing'} — run: comet doctor --repair --scope ${scope}`,
+    });
+  }
   if (scope === 'global') {
     results.push(globalHookCheckResult(platform, scope, inspection));
     return results;
@@ -1531,6 +1553,16 @@ async function repairDoctorState(
     if (target.scope === 'project' && hookResult.status === 'installed') {
       projectRouterReady = true;
     }
+    const enterpriseResult = await installEnterpriseGuard(
+      target.baseDir,
+      target.platform,
+      target.scope,
+    );
+    if (enterpriseResult.status === 'failed') {
+      throw new Error(
+        `failed to repair Enterprise Guard for ${target.platform.name} (${target.scope}): ${enterpriseResult.reason}`,
+      );
+    }
     repaired.push(`${target.platform.name} (${target.scope}) Hook`);
   }
 
@@ -1553,6 +1585,12 @@ async function repairDoctorState(
     }
     if (targetScope === 'project' && hookResult.status === 'installed') {
       projectRouterReady = true;
+    }
+    const enterpriseResult = await installEnterpriseGuard(baseDir, platform, targetScope);
+    if (enterpriseResult.status === 'failed') {
+      throw new Error(
+        `failed to repair Enterprise Guard for ${platform.name} (${targetScope}): ${enterpriseResult.reason}`,
+      );
     }
   }
 
