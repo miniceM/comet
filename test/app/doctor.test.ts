@@ -1403,6 +1403,21 @@ describe('doctor command', () => {
     ).toMatchObject({ status: 'pass' });
   });
 
+  it('reports rules injection and CI fallback for a non-enforced Hook platform', async () => {
+    const codex = PLATFORMS.find((platform) => platform.id === 'codex');
+    expect(codex).toBeDefined();
+    await installManagedCometSkills(tmpDir, '.agents');
+    await installCometHooksForPlatform(tmpDir, codex!, 'project');
+
+    const results = await collectDoctorResults(tmpDir);
+
+    expect(results.find((result) => result.check === 'enterprise guard: Codex (project)')).toEqual({
+      check: 'enterprise guard: Codex (project)',
+      status: 'pass',
+      message: 'rules injection + CI fallback — no Enterprise Guard Hook is installed',
+    });
+  });
+
   it.each([
     'claude',
     'codex',
