@@ -2,6 +2,12 @@
 
 All notable changes to @rpamis/comet will be documented in this file.
 
+## What's Changed [0.4.0-beta.22] - 2026-08-31
+
+### Changed
+
+- **Enterprise Guard coverage reporting**: `comet doctor` now distinguishes Claude Code's project-level enforced Guard from every other platform's rules-injection and CI fallback, so installations no longer imply unverified blocking protection.
+
 ## What's Changed [0.4.0-beta.21] - 2026-08-28
 
 ### Added
