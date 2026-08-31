@@ -53,7 +53,7 @@ import {
   removeStagedSuperpowersManifests,
 } from '../integrations/superpowers.js';
 
-interface RemovalResult {
+export interface RemovalResult {
   removed: number;
   failed: number;
   preserved?: string[];
@@ -628,6 +628,23 @@ function retainedWorkingDirectoryContent(error: unknown, cometDir: string): stri
   return isInsideDirectory(cometDir, contentPath) ? null : contentPath;
 }
 
+function displayProjectPath(
+  projectPath: string,
+  physicalProjectRoot: string,
+  target: string,
+): string {
+  const relative = path.relative(physicalProjectRoot, target);
+  if (
+    relative === '' ||
+    relative === '..' ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    return target;
+  }
+  return path.join(path.resolve(projectPath), relative);
+}
+
 async function removeManagedSkillsFromDirs(
   baseDir: string,
   skillsDirs: string[],
@@ -1034,24 +1051,30 @@ async function removeSuperpowersSkillsForPlatforms(
   return { removed: names.size - remaining, failed };
 }
 
-async function removeCometHooksForPlatform(
+/** Remove only Hook commands belonging to the supplied script-path owner. */
+async function removeManagedHooksForPlatform(
   baseDir: string,
   platform: Platform,
   scope: InstallScope = 'project',
+  hooksConfig: Record<string, unknown>,
+  options: { includeLegacyScripts?: boolean } = {},
 ): Promise<RemovalResult> {
   if (!platform.supportsHooks || !platform.hookFormat) {
     return { removed: 0, failed: 0 };
   }
 
-  const manifest = await readManifest();
-  const hooksConfig = { ...(manifest.hooks ?? {}), ...(manifest.nativeHooks ?? {}) };
-  if (!hooksConfig || Object.keys(hooksConfig).length === 0) {
+  if (Object.keys(hooksConfig).length === 0) {
     return { removed: 0, failed: 0 };
   }
 
   const hookFormat = platform.hookFormat;
   const platformBase = path.join(baseDir, getPlatformConfigDir(platform, scope));
-  const scriptRelPaths = [...new Set([...Object.keys(hooksConfig), ...LEGACY_HOOK_SCRIPT_PATHS])];
+  const scriptRelPaths = [
+    ...new Set([
+      ...Object.keys(hooksConfig),
+      ...(options.includeLegacyScripts ? LEGACY_HOOK_SCRIPT_PATHS : []),
+    ]),
+  ];
 
   try {
     switch (hookFormat) {
@@ -1096,6 +1119,21 @@ async function removeCometHooksForPlatform(
   } catch {
     return { removed: 0, failed: 1 };
   }
+}
+
+async function removeCometHooksForPlatform(
+  baseDir: string,
+  platform: Platform,
+  scope: InstallScope = 'project',
+): Promise<RemovalResult> {
+  const manifest = await readManifest();
+  return removeManagedHooksForPlatform(
+    baseDir,
+    platform,
+    scope,
+    { ...(manifest.hooks ?? {}), ...(manifest.nativeHooks ?? {}) },
+    { includeLegacyScripts: true },
+  );
 }
 
 async function removeQwenStyleHooks(
@@ -1588,7 +1626,7 @@ async function removeWorkingDirs(
       return {
         removed: configResult.removed,
         failed: configResult.failed,
-        preserved: [preservedContent],
+        preserved: [displayProjectPath(projectPath, projectRoot, preservedContent)],
       };
     }
     return {
@@ -1613,6 +1651,7 @@ export {
   removeCometSkillsForPlatform,
   removeCometRulesForPlatform,
   removeCometHooksForPlatform,
+  removeManagedHooksForPlatform,
   removeOpenSpecSkillsForPlatform,
   removeSuperpowersSkillsForPlatforms,
   removeWorkingDirs,

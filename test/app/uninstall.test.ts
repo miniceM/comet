@@ -1822,9 +1822,10 @@ describe('uninstallCommand interactive selection', () => {
     homedirSpy.mockRestore();
     homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
     const rmdir = fs.rmdir.bind(fs);
+    const physicalCometDir = await fs.realpath(path.join(tmpDir, '.comet'));
     const permissionError = Object.assign(new Error('permission denied'), { code: 'EACCES' });
     rmdirMock.mockImplementation(async (targetPath, options) => {
-      if (path.resolve(String(targetPath)) === path.resolve(path.join(tmpDir, '.comet'))) {
+      if ((await fs.realpath(String(targetPath))) === physicalCometDir) {
         throw permissionError;
       }
       await rmdir(targetPath, options);
@@ -1861,10 +1862,11 @@ describe('uninstallCommand interactive selection', () => {
     homedirSpy.mockRestore();
     homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
     const rmdir = fs.rmdir.bind(fs);
+    const physicalCometDir = await fs.realpath(path.join(tmpDir, '.comet'));
     let cometRemovalAttempts = 0;
     const permissionError = Object.assign(new Error('permission denied'), { code: 'EACCES' });
     rmdirMock.mockImplementation(async (targetPath, options) => {
-      if (path.resolve(String(targetPath)) === path.resolve(path.join(tmpDir, '.comet'))) {
+      if ((await fs.realpath(String(targetPath))) === physicalCometDir) {
         cometRemovalAttempts++;
         if (cometRemovalAttempts === 1) throw permissionError;
       }

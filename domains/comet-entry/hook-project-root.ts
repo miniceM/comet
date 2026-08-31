@@ -1,23 +1,53 @@
-import { promises as fs } from 'fs';
+import { promises as fs, realpathSync } from 'fs';
 import path from 'path';
 
 import { listGitWorktreeRoots } from '../../platform/paths/git-worktree.js';
 import type { CometHookRequest } from './hook-types.js';
 
+function physicalPath(value: string): string {
+  const resolved = path.resolve(value);
+  const missingSegments: string[] = [];
+  let cursor = resolved;
+
+  while (true) {
+    try {
+      return path.join(realpathSync(cursor), ...missingSegments.reverse());
+    } catch {
+      const parent = path.dirname(cursor);
+      if (parent === cursor) return resolved;
+      missingSegments.push(path.basename(cursor));
+      cursor = parent;
+    }
+  }
+}
+
 function samePath(left: string, right: string): boolean {
-  const normalizedLeft = path.resolve(left);
-  const normalizedRight = path.resolve(right);
+  const normalizedLeft = physicalPath(left);
+  const normalizedRight = physicalPath(right);
   return process.platform === 'win32'
     ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
     : normalizedLeft === normalizedRight;
 }
 
 function isWithin(root: string, candidate: string): boolean {
-  const relative = path.relative(root, candidate);
+  const relative = path.relative(physicalPath(root), physicalPath(candidate));
   return (
     relative === '' ||
     (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
   );
+}
+
+function logicalRootForTarget(target: string, physicalRoot: string): string | null {
+  const physicalTarget = physicalPath(target);
+  const relative = path.relative(physicalPath(physicalRoot), physicalTarget);
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    return null;
+  }
+  let logicalRoot = path.resolve(target);
+  for (const segment of relative.split(path.sep)) {
+    if (segment) logicalRoot = path.dirname(logicalRoot);
+  }
+  return logicalRoot;
 }
 
 function owningWorktree(candidate: string, roots: readonly string[]): string | null {
@@ -50,9 +80,10 @@ export async function resolveCometHookProjectRoot(
   const roots = listGitWorktreeRoots(explicitRoot);
   if (roots.length < 2 || request.targets.length === 0) return explicitRoot;
 
-  const cwdOwner = request.cwd ? owningWorktree(path.resolve(request.cwd), roots) : null;
-  const relativeTargetBase = cwdOwner ?? explicitRoot;
-  const owners = new Map<string, string>();
+  const requestedCwd = request.cwd ? path.resolve(request.cwd) : null;
+  const cwdOwner = requestedCwd ? owningWorktree(requestedCwd, roots) : null;
+  const relativeTargetBase = cwdOwner && requestedCwd ? requestedCwd : explicitRoot;
+  const owners = new Map<string, { physicalRoot: string; logicalRoot: string | null }>();
 
   for (const target of request.targets) {
     const absoluteTarget = path.isAbsolute(target)
@@ -61,7 +92,11 @@ export async function resolveCometHookProjectRoot(
     const owner = owningWorktree(absoluteTarget, roots);
     if (!owner) continue;
     const key = process.platform === 'win32' ? owner.toLowerCase() : owner;
-    owners.set(key, owner);
+    const existing = owners.get(key);
+    owners.set(key, {
+      physicalRoot: owner,
+      logicalRoot: existing?.logicalRoot ?? logicalRootForTarget(absoluteTarget, owner),
+    });
   }
 
   if (owners.size === 0) return explicitRoot;
@@ -69,9 +104,9 @@ export async function resolveCometHookProjectRoot(
     throw new Error('one Hook request cannot write across multiple Git worktrees');
   }
 
-  const [selectedRoot] = owners.values();
-  if (!samePath(selectedRoot, explicitRoot)) {
-    await assertRebasedWorktreeReady(selectedRoot);
+  const [selected] = owners.values();
+  if (!samePath(selected.physicalRoot, explicitRoot)) {
+    await assertRebasedWorktreeReady(selected.physicalRoot);
   }
-  return selectedRoot;
+  return selected.logicalRoot ?? selected.physicalRoot;
 }

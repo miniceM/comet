@@ -51,6 +51,7 @@ function isNativeInstallSkillPath(skillPath: string): boolean {
     skillPath === 'comet/SKILL.md' ||
     skillPath.startsWith('comet-review/') ||
     skillPath === 'comet/scripts/comet-entry-runtime.mjs' ||
+    skillPath === 'comet/scripts/comet-enterprise-hook.mjs' ||
     skillPath === 'comet/scripts/comet-hook-router.mjs' ||
     skillPath.startsWith('comet-native/') ||
     skillPath.startsWith('comet-any/')
@@ -359,6 +360,9 @@ describe('comet init E2E', () => {
       await expect(
         fs.stat(path.join(tmpDir, '.claude', 'settings.local.json')),
       ).resolves.toBeDefined();
+      await expect(
+        fs.readFile(path.join(tmpDir, '.claude', 'settings.local.json'), 'utf8'),
+      ).resolves.toContain('comet-enterprise-hook.mjs');
 
       const projectConfig = await fs.readFile(path.join(tmpDir, '.comet', 'config.yaml'), 'utf8');
       expect(projectConfig).toContain('default_workflow: native');

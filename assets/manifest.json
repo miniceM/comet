@@ -1,5 +1,5 @@
 {
-  "version": "0.4.0-beta.20",
+  "version": "0.4.0-beta.21",
   "skills": [
     "comet/SKILL.md",
     "comet/agents/openai.yaml",
@@ -43,6 +43,7 @@
     "comet/scripts/comet-resume-probe.mjs",
     "comet/scripts/comet-entry-runtime.mjs",
     "comet/scripts/comet-hook-router.mjs",
+    "comet/scripts/comet-enterprise-hook.mjs",
     "comet-native/SKILL.md",
     "comet-native/agents/openai.yaml",
     "comet-native/reference/artifacts.md",

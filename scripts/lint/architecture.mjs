@@ -188,6 +188,12 @@ for (const [name, output] of Object.entries(layout.entryRuntime?.outputs ?? {}))
     fail(`entry resolver runtime output "${name}" -> "${output}" is missing`);
   }
 }
+if (!isFile(layout.enterpriseGuardRuntime?.entry ?? '')) {
+  fail(`enterprise guard runtime entry "${layout.enterpriseGuardRuntime?.entry}" is missing`);
+}
+if (!isFile(layout.enterpriseGuardRuntime?.output ?? '')) {
+  fail(`enterprise guard runtime output "${layout.enterpriseGuardRuntime?.output}" is missing`);
+}
 if (!isFile(layout.manifestPath)) {
   fail(`asset manifest "${layout.manifestPath}" is missing`);
 }

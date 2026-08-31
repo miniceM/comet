@@ -55,6 +55,10 @@ describe('repository layout registry', () => {
     expect(resolveRepositoryPath(layout.entryRuntime.outputs.runtime)).toBe(
       path.resolve('assets', 'skills', 'comet', 'scripts', 'comet-entry-runtime.mjs'),
     );
+    expect(layout.enterpriseGuardRuntime).toEqual({
+      entry: 'domains/enterprise-guard/enterprise-hook-entry.ts',
+      output: 'assets/skills/comet/scripts/comet-enterprise-hook.mjs',
+    });
   });
 
   it('tracks active source roots', () => {
@@ -69,6 +73,7 @@ describe('repository layout registry', () => {
       'comet-native',
       'dashboard',
       'engine',
+      'enterprise-guard',
       'eval',
       'factory',
       'integrations',
