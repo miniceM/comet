@@ -19,6 +19,7 @@
 5. [威胁模型](threat-model.md)：明确三层覆盖能防什么、不能防什么。
 6. [平台能力矩阵](platform-capability-matrix.md)：决定某个实现能否把平台 Hook 用作阻断点，还是必须只依赖 CI。
 7. [覆盖能力报告](platform-coverage.md)：汇总当前每个平台的安装范围、拦截工具、阻断保证与降级路径。
+8. [findings 消费协议](review-consumption.md)：L4 `/sdd-review` 的 reader 消费规则与 L7 基线完整性检查。
 
 ## 兼容性规则
 

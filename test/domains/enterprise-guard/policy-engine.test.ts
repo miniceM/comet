@@ -6,7 +6,7 @@ import {
 } from '../../../domains/enterprise-guard/policy-engine.js';
 
 describe('enterprise guard policy engine', () => {
-  it('maps Claude Write, Edit, and Bash input to the versioned policy contract', () => {
+  it('maps Claude Write, Edit, and Bash input to the EnterpriseHookInput v1 contract', () => {
     expect(
       parseClaudeEnterpriseHookInput(
         JSON.stringify({
@@ -17,15 +17,20 @@ describe('enterprise guard policy engine', () => {
         }),
       ),
     ).toMatchObject({
-      schema: 'comet.enterprise-hook-input.v1',
-      platform: 'claude',
-      event: 'PreToolUse',
-      tool: 'Write',
-      cwd: '/workspace/project',
-      paths: ['src/config.ts'],
-      writeFragments: ['export const port = 3000;'],
-      command: null,
-      truncated: false,
+      schemaVersion: 'comet.enterprise-hook-input.v1',
+      platform: { id: 'claude', surface: 'project' },
+      event: { name: 'PreToolUse', preAction: true, blockingCapable: true },
+      workingDirectory: { value: '/workspace/project', truncated: false },
+      tool: { name: { value: 'Write' } },
+      command: { value: null },
+      writes: [
+        {
+          operation: 'create',
+          path: { value: 'src/config.ts', truncated: false },
+          fragment: { value: 'export const port = 3000;', truncated: false },
+        },
+      ],
+      parse: { status: 'complete', errors: [] },
     });
 
     expect(
@@ -36,8 +41,13 @@ describe('enterprise guard policy engine', () => {
           tool_name: 'Edit',
           tool_input: { file_path: 'src/config.ts', new_string: 'export const port = 4000;' },
         }),
-      ).writeFragments,
-    ).toEqual(['export const port = 4000;']);
+      ).writes,
+    ).toEqual([
+      expect.objectContaining({
+        operation: 'edit',
+        fragment: expect.objectContaining({ value: 'export const port = 4000;' }),
+      }),
+    ]);
 
     expect(
       parseClaudeEnterpriseHookInput(
@@ -49,178 +59,210 @@ describe('enterprise guard policy engine', () => {
         }),
       ),
     ).toMatchObject({
-      tool: 'Bash',
-      command: 'git status --short',
-      writeFragments: [],
+      tool: { name: { value: 'Bash' } },
+      command: { value: 'git status --short', truncated: false },
+      writes: [],
+    });
+  });
+
+  it('fails closed when a Claude input cannot be parsed', () => {
+    const input = parseClaudeEnterpriseHookInput('{not-json');
+
+    expect(input.parse).toMatchObject({ status: 'failed' });
+    expect(evaluateEnterpriseHookInput(input)).toMatchObject({
+      allowed: false,
+      ruleId: 'EG-HARD-INPUT-001',
     });
   });
 
   it('blocks the approved HARD rule set without echoing secret material', () => {
     const fixtures = [
       {
-        input: {
-          schema: 'comet.enterprise-hook-input.v1' as const,
-          platform: 'claude' as const,
-          event: 'PreToolUse' as const,
-          tool: 'Write',
-          cwd: '/workspace/project',
-          paths: ['.env'],
-          command: null,
-          writeFragments: ['TOKEN=value'],
-          truncated: false,
-        },
-        ruleId: 'EG.HARD.ENV_WRITE',
+        source: { tool_name: 'Write', tool_input: { file_path: '.env', content: 'TOKEN=value' } },
+        ruleId: 'EG-HARD-ENV-001',
       },
       {
-        input: {
-          schema: 'comet.enterprise-hook-input.v1' as const,
-          platform: 'claude' as const,
-          event: 'PreToolUse' as const,
-          tool: 'Write',
-          cwd: '/workspace/project',
-          paths: ['src/config.ts'],
-          command: null,
-          writeFragments: [`const key = '${'AKIA' + '0'.repeat(16)}';`],
-          truncated: false,
+        source: {
+          tool_name: 'Write',
+          tool_input: { file_path: 'src/config.ts', content: `key=${'AKIA' + '0'.repeat(16)}` },
         },
-        ruleId: 'EG.HARD.EMBEDDED_SECRET',
+        ruleId: 'EG-HARD-SECRET-001',
       },
       {
-        input: {
-          schema: 'comet.enterprise-hook-input.v1' as const,
-          platform: 'claude' as const,
-          event: 'PreToolUse' as const,
-          tool: 'Write',
-          cwd: '/workspace/project',
-          paths: ['src/tls.ts'],
-          command: null,
-          writeFragments: ['-----BEGIN PRIVATE KEY-----'],
-          truncated: false,
+        source: {
+          tool_name: 'Edit',
+          tool_input: { file_path: 'src/tls.ts', new_string: '-----BEGIN PRIVATE KEY-----' },
         },
-        ruleId: 'EG.HARD.PRIVATE_KEY',
+        ruleId: 'EG-HARD-SECRET-001',
       },
       {
-        input: {
-          schema: 'comet.enterprise-hook-input.v1' as const,
-          platform: 'claude' as const,
-          event: 'PreToolUse' as const,
-          tool: 'Bash',
-          cwd: '/workspace/project',
-          paths: [],
-          command: 'rm -rf /',
-          writeFragments: [],
-          truncated: false,
-        },
-        ruleId: 'EG.HARD.DESTRUCTIVE_DELETE',
+        source: { tool_name: 'Bash', tool_input: { command: 'rm -rf /' } },
+        ruleId: 'EG-HARD-RM-001',
       },
       {
-        input: {
-          schema: 'comet.enterprise-hook-input.v1' as const,
-          platform: 'claude' as const,
-          event: 'PreToolUse' as const,
-          tool: 'Bash',
-          cwd: '/workspace/project',
-          paths: [],
-          command: 'git push --force origin main',
-          writeFragments: [],
-          truncated: false,
-        },
-        ruleId: 'EG.HARD.FORCE_PUSH',
+        source: { tool_name: 'Bash', tool_input: { command: 'git push --force origin main' } },
+        ruleId: 'EG-HARD-GIT-001',
       },
       {
-        input: {
-          schema: 'comet.enterprise-hook-input.v1' as const,
-          platform: 'claude' as const,
-          event: 'PreToolUse' as const,
-          tool: 'Bash',
-          cwd: '/workspace/project',
-          paths: [],
-          command: 'sudo rm -rf -- /',
-          writeFragments: [],
-          truncated: false,
-        },
-        ruleId: 'EG.HARD.DESTRUCTIVE_DELETE',
+        source: { tool_name: 'Bash', tool_input: { command: 'sudo rm -rf -- /' } },
+        ruleId: 'EG-HARD-RM-001',
       },
       {
-        input: {
-          schema: 'comet.enterprise-hook-input.v1' as const,
-          platform: 'claude' as const,
-          event: 'PreToolUse' as const,
-          tool: 'Bash',
-          cwd: '/workspace/project',
-          paths: [],
-          command: '/bin/rm -rf /',
-          writeFragments: [],
-          truncated: false,
-        },
-        ruleId: 'EG.HARD.DESTRUCTIVE_DELETE',
+        source: { tool_name: 'Bash', tool_input: { command: '/bin/rm -rf /' } },
+        ruleId: 'EG-HARD-RM-001',
       },
       {
-        input: {
-          schema: 'comet.enterprise-hook-input.v1' as const,
-          platform: 'claude' as const,
-          event: 'PreToolUse' as const,
-          tool: 'Bash',
-          cwd: '/workspace/project',
-          paths: [],
-          command: 'git -c core.sshCommand=ssh push --force origin main',
-          writeFragments: [],
-          truncated: false,
+        source: {
+          tool_name: 'Bash',
+          tool_input: { command: 'git -c core.sshCommand=ssh push --force origin main' },
         },
-        ruleId: 'EG.HARD.FORCE_PUSH',
+        ruleId: 'EG-HARD-GIT-001',
       },
     ];
 
     for (const fixture of fixtures) {
-      const decision = evaluateEnterpriseHookInput(fixture.input);
+      const decision = evaluateEnterpriseHookInput(
+        parseClaudeEnterpriseHookInput(JSON.stringify(fixture.source)),
+      );
       expect(decision).toMatchObject({ allowed: false, ruleId: fixture.ruleId });
       expect(decision.reason).not.toContain('AKIA');
       expect(decision.reason).not.toContain('TOKEN=value');
     }
   });
 
-  it('allows documented .env examples and ordinary work', () => {
-    const example = evaluateEnterpriseHookInput({
-      schema: 'comet.enterprise-hook-input.v1',
-      platform: 'claude',
-      event: 'PreToolUse',
-      tool: 'Write',
-      cwd: '/workspace/project',
-      paths: ['.env.example'],
-      command: null,
-      writeFragments: ['API_TOKEN=replace-me'],
-      truncated: false,
-    });
-    const ordinary = evaluateEnterpriseHookInput({
-      schema: 'comet.enterprise-hook-input.v1',
-      platform: 'claude',
-      event: 'PreToolUse',
-      tool: 'Bash',
-      cwd: '/workspace/project',
-      paths: [],
-      command: 'pnpm test --runInBand',
-      writeFragments: [],
-      truncated: false,
-    });
+  it('keeps secret detection active for templates and Bash arguments', () => {
+    const template = parseClaudeEnterpriseHookInput(
+      JSON.stringify({
+        tool_name: 'Write',
+        tool_input: {
+          file_path: '.env.example',
+          content: `AWS_ACCESS_KEY_ID=${'AKIA' + '0'.repeat(16)}`,
+        },
+      }),
+    );
+    const bash = parseClaudeEnterpriseHookInput(
+      JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command: `export AWS_ACCESS_KEY_ID=${'AKIA' + '0'.repeat(16)}` },
+      }),
+    );
+    const patch = parseClaudeEnterpriseHookInput(
+      JSON.stringify({
+        tool_name: 'Edit',
+        tool_input: {
+          file_path: 'src/config.ts',
+          patch: `AWS_ACCESS_KEY_ID=${'AKIA' + '0'.repeat(16)}`,
+        },
+      }),
+    );
+    const heredoc = parseClaudeEnterpriseHookInput(
+      JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: {
+          command: `cat <<'EOF'\nAWS_ACCESS_KEY_ID=${'AKIA' + '0'.repeat(16)}\nEOF`,
+        },
+      }),
+    );
 
-    expect(example).toMatchObject({ allowed: true, ruleId: null });
-    expect(ordinary).toMatchObject({ allowed: true, ruleId: null });
+    for (const input of [template, bash, patch, heredoc]) {
+      expect(evaluateEnterpriseHookInput(input)).toMatchObject({
+        allowed: false,
+        ruleId: 'EG-HARD-SECRET-001',
+      });
+    }
   });
 
-  it('does not treat an arbitrary documentation path as an environment-file exception', () => {
-    const decision = evaluateEnterpriseHookInput({
-      schema: 'comet.enterprise-hook-input.v1',
-      platform: 'claude',
-      event: 'PreToolUse',
-      tool: 'Write',
-      cwd: '/workspace/project',
-      paths: ['docs/guide/.env'],
-      command: null,
-      writeFragments: ['TOKEN=value'],
-      truncated: false,
-    });
+  it('blocks protected destructive operations inside command substitutions and warns for non-protected force pushes', () => {
+    const dangerous = parseClaudeEnterpriseHookInput(
+      JSON.stringify({
+        cwd: '/workspace/project',
+        tool_name: 'Bash',
+        tool_input: { command: 'printf "%s" "$(rm -rf .)"' },
+      }),
+    );
+    const nonProtectedPush = parseClaudeEnterpriseHookInput(
+      JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command: 'git push --force origin feature/isolated-guard' },
+      }),
+    );
 
-    expect(decision).toMatchObject({ allowed: false, ruleId: 'EG.HARD.ENV_WRITE' });
+    expect(evaluateEnterpriseHookInput(dangerous)).toMatchObject({
+      allowed: false,
+      ruleId: 'EG-HARD-RM-001',
+    });
+    expect(evaluateEnterpriseHookInput(nonProtectedPush)).toMatchObject({
+      allowed: true,
+      ruleId: null,
+      warningRuleIds: ['EG-SOFT-GIT-002'],
+    });
+  });
+
+  it('downgrades only a valid, unexpired, approved exception to a review warning', () => {
+    const input = parseClaudeEnterpriseHookInput(
+      JSON.stringify({
+        tool_name: 'Write',
+        tool_input: { file_path: 'config/.env', content: 'TOKEN=value' },
+      }),
+    );
+    const exception = {
+      schemaVersion: 'comet.enterprise-exception.v1' as const,
+      exceptionId: 'EGE-ENV-REVIEW',
+      ruleId: 'EG-HARD-ENV-001',
+      scope: { kind: 'path' as const, value: 'config/.env' },
+      reason: 'The generated template is reviewed by the protected release process.',
+      owner: 'security@example.test',
+      expiresAt: '2026-12-31T00:00:00.000Z',
+      approval: {
+        changeId: 'CHG-123',
+        approvedBy: 'security@example.test',
+        approvedAt: '2026-08-31T00:00:00.000Z',
+        protectedRef: 'refs/heads/main',
+      },
+      ci: {
+        provider: 'github-actions',
+        runId: '456',
+        conclusion: 'passed' as const,
+        protectedRef: 'refs/heads/main',
+      },
+      status: 'active' as const,
+    };
+
+    expect(
+      evaluateEnterpriseHookInput(input, {
+        exceptions: [exception],
+        now: new Date('2026-08-31T00:00:00.000Z'),
+      }),
+    ).toMatchObject({
+      allowed: true,
+      warningRuleIds: ['EG-HARD-ENV-001'],
+      results: expect.arrayContaining([
+        expect.objectContaining({ exceptionId: 'EGE-ENV-REVIEW', decision: 'warn' }),
+      ]),
+    });
+    expect(
+      evaluateEnterpriseHookInput(input, {
+        exceptions: [{ ...exception, expiresAt: '2026-01-01T00:00:00.000Z' }],
+        now: new Date('2026-08-31T00:00:00.000Z'),
+      }),
+    ).toMatchObject({ allowed: false, ruleId: 'EG-HARD-ENV-001' });
+    expect(
+      evaluateEnterpriseHookInput(input, {
+        exceptions: [
+          {
+            ...exception,
+            ci: { ...exception.ci, protectedRef: 'refs/heads/release' },
+          },
+        ],
+        now: new Date('2026-08-31T00:00:00.000Z'),
+      }),
+    ).toMatchObject({ allowed: false, ruleId: 'EG-HARD-ENV-001' });
+    expect(
+      evaluateEnterpriseHookInput(input, {
+        exceptions: [{ ...exception, exceptionId: 'not-an-exception-id' }],
+        now: new Date('2026-08-31T00:00:00.000Z'),
+      }),
+    ).toMatchObject({ allowed: false, ruleId: 'EG-HARD-ENV-001' });
   });
 
   it('fails closed when the Hook input exceeds its supported size', () => {
@@ -231,10 +273,24 @@ describe('enterprise guard policy engine', () => {
       }),
     );
 
-    expect(input.truncated).toBe(true);
+    expect(input.truncation.fields.some((field) => field.truncated)).toBe(true);
     expect(evaluateEnterpriseHookInput(input)).toMatchObject({
       allowed: false,
-      ruleId: 'EG.HARD.TRUNCATED_INPUT',
+      ruleId: 'EG-HARD-INPUT-001',
     });
+  });
+
+  it('keeps regex-based scans bounded for adversarial but supported Hook input', () => {
+    const input = parseClaudeEnterpriseHookInput(
+      JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command: `printf '%s' '${'('.repeat(60 * 1024)}'` },
+      }),
+    );
+    const startedAt = performance.now();
+    const decision = evaluateEnterpriseHookInput(input);
+
+    expect(performance.now() - startedAt).toBeLessThan(500);
+    expect(decision).toMatchObject({ allowed: true, ruleId: null });
   });
 });

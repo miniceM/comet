@@ -2,6 +2,8 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { renderCometHookDecision } from '../comet-entry/hook-adapter.js';
+import { readEnterpriseExceptions } from './exceptions.js';
+import { recordEnterpriseFindings } from './findings.js';
 import {
   evaluateEnterpriseHookInput,
   MAX_ENTERPRISE_HOOK_INPUT_BYTES,
@@ -11,6 +13,32 @@ import {
 export function runEnterpriseGuard(platformId: string, source: string) {
   const input = parseClaudeEnterpriseHookInput(source);
   const decision = evaluateEnterpriseHookInput(input);
+  return renderCometHookDecision(platformId, decision);
+}
+
+/** Evaluate and persist redacted findings before Claude receives the Hook response. */
+export async function runEnterpriseGuardWithAudit(
+  platformId: string,
+  source: string,
+  projectRoot: string | null = null,
+) {
+  const input = parseClaudeEnterpriseHookInput(source);
+  const auditRoot = projectRoot ?? input.workingDirectory.value;
+  const decision = evaluateEnterpriseHookInput(
+    input,
+    auditRoot ? { exceptions: await readEnterpriseExceptions(auditRoot) } : {},
+  );
+  if (platformId === 'claude') {
+    if (!auditRoot) return renderCometHookDecision(platformId, decision);
+    try {
+      await recordEnterpriseFindings(auditRoot, input, decision);
+    } catch {
+      return renderCometHookDecision(platformId, {
+        allowed: false,
+        reason: 'Enterprise Guard audit persistence is unavailable',
+      });
+    }
+  }
   return renderCometHookDecision(platformId, decision);
 }
 
@@ -54,8 +82,11 @@ function platformFromArgs(args: readonly string[]): string {
 }
 
 if (isDirectEntry(process.argv[1])) {
-  void readStdin().then((source) => {
-    const output = runEnterpriseGuard(platformFromArgs(process.argv.slice(2)), source);
+  void readStdin().then(async (source) => {
+    const output = await runEnterpriseGuardWithAudit(
+      platformFromArgs(process.argv.slice(2)),
+      source,
+    );
     if (output.stdout) process.stdout.write(output.stdout);
     if (output.stderr) process.stderr.write(output.stderr);
     process.exitCode = output.exitCode;
