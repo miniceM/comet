@@ -2,6 +2,16 @@
 
 All notable changes to @rpamis/comet will be documented in this file.
 
+## What's Changed [0.4.0-beta.22] - 2026-08-31
+
+### Added
+
+- **Enterprise Guard audit integrity**: Guard findings are now redacted, append safely under concurrent Hooks, and expose a schema-validated reader for review and CI consumers; corruption or a recorded hard denial blocks review.
+
+### Changed
+
+- **Enterprise Guard policy contract**: Claude Guard evaluation now emits versioned per-rule results for bounded write and shell inspection, fails closed on incomplete input, supports time-bounded approved exceptions, and verifies source, contract, and published runtime alignment in CI.
+
 ## What's Changed [0.4.0-beta.21] - 2026-08-28
 
 ### Added

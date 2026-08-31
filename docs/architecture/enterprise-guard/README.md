@@ -18,6 +18,7 @@
 4. [策略与规则目录](policy.md)：定义规则边界、失败分级和例外判定。
 5. [威胁模型](threat-model.md)：明确三层覆盖能防什么、不能防什么。
 6. [平台能力矩阵](platform-capability-matrix.md)：决定某个实现能否把平台 Hook 用作阻断点，还是必须只依赖 CI。
+7. [findings 消费协议](review-consumption.md)：L4 `/sdd-review` 的 reader 消费规则与 L7 基线完整性检查。
 
 ## 兼容性规则
 

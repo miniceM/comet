@@ -1,6 +1,6 @@
 {
   "name": "@rpamis/comet",
-  "version": "0.4.0-beta.21",
+  "version": "0.4.0-beta.22",
   "description": "Agent Skill Harness For Turning Ideas Into Evaluated Workflows",
   "keywords": [
     "comet",
@@ -63,8 +63,9 @@
     "test:dashboard-e2e": "playwright test --config test/domains/dashboard/playwright.config.ts",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "lint": "eslint app/ domains/ platform/ && pnpm run lint:architecture",
+    "lint": "eslint app/ domains/ platform/ && pnpm run lint:architecture && pnpm run lint:enterprise-guard",
     "lint:architecture": "node scripts/lint/architecture.mjs",
+    "lint:enterprise-guard": "node scripts/lint/enterprise-guard-baseline.mjs",
     "lint:fix": "eslint app/ domains/ platform/ --fix",
     "format": "prettier --write app/ domains/ platform/ scripts/ test/ .github/ config/ package.json vitest.config.ts build.js tsconfig.json",
     "format:check": "prettier --check app/ domains/ platform/ scripts/ test/ .github/ config/ package.json vitest.config.ts build.js tsconfig.json",

@@ -37,7 +37,7 @@ describe('enterprise guard release asset', () => {
 
     expect(result.status).toBe(2);
     expect(result.stdout).toBe('');
-    expect(result.stderr).toContain('EG.HARD.FORCE_PUSH');
+    expect(result.stderr).toContain('EG-HARD-GIT-001');
   });
 
   it('drains oversized stdin before enforcing the size limit', () => {
@@ -53,6 +53,6 @@ describe('enterprise guard release asset', () => {
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(2);
     expect(result.stdout).toBe('');
-    expect(result.stderr).toContain('EG.HARD.TRUNCATED_INPUT');
+    expect(result.stderr).toContain('EG-HARD-INPUT-001');
   });
 });
