@@ -35,6 +35,7 @@ import {
   collectNativeDashboardOverview,
   collectNativeDashboardProjection,
 } from '../../../domains/dashboard/native-collector.js';
+import { DashboardIndexStore } from '../../../domains/dashboard/index-store.js';
 
 const NOW = '2026-08-09T08:00:00.000Z';
 const LEGACY_ARCHIVE_FIXTURE = path.resolve('docs/comet/archive/2026-07-21-classic-config-block');
@@ -720,5 +721,68 @@ describe('Native Dashboard v2 collector', () => {
         locator: 'not-a-native-locator',
       }),
     ).resolves.toBeNull();
+  });
+
+  it('serves a warm Native list from the SQLite index before background refresh', async () => {
+    await enableNative();
+    const changeDir = await writeActiveState(activeShapeState('cached-change'));
+
+    const first = await collectNativeDashboardChangePage(projectRoot, {
+      status: 'active',
+      limit: 5,
+    });
+    expect(first.items.map(({ name }) => name)).toEqual(['cached-change']);
+
+    await fs.rm(changeDir, { recursive: true, force: true });
+
+    const second = await collectNativeDashboardChangePage(projectRoot, {
+      status: 'active',
+      limit: 5,
+    });
+    expect(second.items.map(({ name }) => name)).toEqual(['cached-change']);
+  });
+
+  it('refreshes a cached Native list when its workspace source is internal', async () => {
+    await enableNative();
+    await writeActiveState(activeShapeState('fresh-change'));
+
+    await expect(
+      collectNativeDashboardChangePage(projectRoot, {
+        status: 'active',
+        limit: 5,
+      }),
+    ).resolves.toMatchObject({ items: [expect.objectContaining({ name: 'fresh-change' })] });
+
+    const store = new DashboardIndexStore({ projectRoot });
+    await store.open();
+    const cached = (await store.readNativeIndex()) as {
+      active: Array<Record<string, unknown>>;
+      archived: Array<Record<string, unknown>>;
+      all: Array<Record<string, unknown>>;
+    };
+    const stale = JSON.parse(JSON.stringify(cached)) as typeof cached;
+    const candidate = stale.active[0];
+    const source = candidate?.source as Record<string, unknown>;
+    const workspace = source.workspace as Record<string, unknown>;
+    candidate.source = {
+      ...source,
+      workspace: {
+        ...workspace,
+        projectRoot: path.join(projectRoot, '.comet', 'runtime', 'stale'),
+        branch: null,
+        current: false,
+        label: 'detached:stale',
+      },
+    };
+    await store.replaceNativeIndex(stale);
+    await store.close();
+
+    const refreshed = await collectNativeDashboardChangePage(projectRoot, {
+      status: 'active',
+      limit: 5,
+    });
+
+    expect(refreshed.items.map(({ name }) => name)).toEqual(['fresh-change']);
+    expect(refreshed.items[0]?.workspace).toMatchObject({ current: true });
   });
 });

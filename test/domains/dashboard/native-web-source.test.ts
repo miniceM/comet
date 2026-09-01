@@ -86,9 +86,31 @@ describe('Native dashboard web source contracts', () => {
     expect(source).toContain('<DashboardWorkspaceRegion');
     expect(nativeSource).toContain('native-changes-explorer');
     expect(nativeSource).toContain('native-change-detail');
-    expect(nativeSource).toContain('语义验收不可用');
-    expect(nativeSource).toContain('用户确认降级通过');
+    expect(nativeSource).toContain('无法完成完整验证，只完成了自动检查');
+    expect(nativeSource).toContain('你已确认接受不完整验证结果');
+    expect(nativeSource).toContain('已完成检查，验证结果已确认');
     expect(source).not.toContain('<NativeWorkflowPanel native={snapshot.native} />');
+  });
+
+  it('keeps the three-pane Native workspace visible when the selected view is empty', async () => {
+    const [source, styles] = await Promise.all([
+      readNativePanelSource(),
+      fs.readFile(path.resolve('domains', 'dashboard', 'web', 'src', 'styles.css'), 'utf8'),
+    ]);
+
+    expect(source).toContain('const isEmptyView = !pageLoading && visibleChanges.length === 0');
+    expect(source).toContain('const isLoadingView = pageLoading && visibleChanges.length === 0');
+    expect(source).toContain('<NativeEmptyChangeDetail');
+    expect(source).toContain('emptyProject={!hasNativeChanges}');
+    expect(source).toContain('<NativeEmptySidePanel />');
+    expect(source).toContain('<NativeChangeDetailSkeleton />');
+    expect(source).toContain('<NativeSidePanelSkeleton />');
+    expect(source).toContain('native-change-list-skeleton');
+    expect(source).not.toContain('<Spin');
+    expect(source).not.toContain('NativeWorkspaceLoadingState');
+    expect(source).toContain('当前没有活跃的 Native change');
+    expect(styles).toContain('.native-change-detail-empty');
+    expect(styles).toContain('.dashboard-workspace-side-empty');
   });
 
   it('renders Native parent children as an accessible expandable explorer tree', async () => {

@@ -235,21 +235,12 @@ describe('update command helpers', () => {
     mockedSpawn.mockClear();
     mockedGetLatestVersion.mockClear();
     mockedInstallOpenSpec.mockReset();
-    mockedInstallOpenSpec.mockImplementation(
-      async (
-        projectPath,
-        _toolIds,
-        scope,
-        _shouldInstallCli,
-        _mirrorOpenCodePlatformIds,
-        artifactLayout,
-      ) => {
-        if (scope === 'project') {
-          await writeMockOpenSpecProject(projectPath, artifactLayout);
-        }
-        return 'installed';
-      },
-    );
+    mockedInstallOpenSpec.mockImplementation(async (projectPath, _toolIds, scope, options = {}) => {
+      if (scope === 'project') {
+        await writeMockOpenSpecProject(projectPath, options.artifactLayout ?? 'legacy');
+      }
+      return 'installed';
+    });
     mockedInstallSuperpowers.mockReset();
     mockedInstallSuperpowers.mockResolvedValue('installed');
     mockedSpawn.mockImplementation((_command, args, options) => {
@@ -546,6 +537,35 @@ describe('update command helpers', () => {
       await fs.readFile(path.join(projectDir, '.workbuddy', 'settings.json'), 'utf8'),
     );
     expect(settings.hooks.PreToolUse).toEqual([expect.objectContaining({ matcher: 'Write|Edit' })]);
+  });
+
+  it('updates Oh My Pi through the omp alias with native Skills, Rule, and Hook paths', async () => {
+    const projectDir = path.join(tmpDir, 'oh-my-pi-project');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(projectDir, {
+        json: true,
+        skipNpm: true,
+        scope: 'project',
+        platform: 'omp',
+      });
+    } finally {
+      log.mockRestore();
+    }
+
+    await expect(
+      fs.access(path.join(projectDir, '.omp', 'skills', 'comet', 'SKILL.md')),
+    ).resolves.toBeUndefined();
+    const rule = await fs.readFile(
+      path.join(projectDir, '.omp', 'rules', 'comet-workflow-guard.mdc'),
+      'utf8',
+    );
+    expect(rule).toContain('alwaysApply: true');
+    const hook = await fs.readFile(
+      path.join(projectDir, '.omp', 'hooks', 'pre', 'comet-hook-router.ts'),
+      'utf8',
+    );
+    expect(hook).toContain("'--platform', 'oh-my-pi'");
   });
 
   it('detects legacy global Pi skills so update can migrate them', async () => {
@@ -2134,14 +2154,13 @@ describe('update command helpers', () => {
       tmpDir,
       ['claude'],
       'project',
-      true,
-      [],
-      'docs',
-      expect.any(Function),
-      undefined,
-      [],
-      [],
-      ['claude'],
+      expect.objectContaining({
+        shouldInstallCli: true,
+        mirrorPlatformIds: [],
+        artifactLayout: 'docs',
+        projectMutationGuard: expect.any(Function),
+        selectedPlatformIds: ['claude'],
+      }),
     );
     await expect(fs.access(path.join(tmpDir, 'openspec'))).rejects.toMatchObject({
       code: 'ENOENT',
@@ -2211,16 +2230,66 @@ describe('update command helpers', () => {
       tmpDir,
       ['claude'],
       'project',
-      true,
-      [],
-      'docs',
-      expect.any(Function),
-      undefined,
-      [],
-      [],
-      ['claude'],
+      expect.objectContaining({
+        shouldInstallCli: true,
+        mirrorPlatformIds: [],
+        artifactLayout: 'docs',
+        projectMutationGuard: expect.any(Function),
+        selectedPlatformIds: ['claude'],
+      }),
     );
     expect(mockedInstallSuperpowers).toHaveBeenCalledWith(tmpDir, 'project', ['claude'], true);
+  });
+
+  it('updates dsh Classic dependencies through the Claude-shaped OpenSpec contract', async () => {
+    const fakeHome = path.join(tmpDir, 'dsh-classic-dependencies-self-update-home');
+    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+    await fs.mkdir(path.join(tmpDir, '.dsh', 'skills', 'comet-classic'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.dsh', 'skills', 'comet-classic', 'SKILL.md'),
+      '# Comet Classic\n',
+      'utf8',
+    );
+    await fs.mkdir(path.join(tmpDir, '.dsh', 'skills', 'openspec-propose'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.dsh', 'skills', 'openspec-propose', 'SKILL.md'),
+      '# OpenSpec\n',
+      'utf8',
+    );
+    await fs.mkdir(path.join(tmpDir, '.dsh', 'skills', 'brainstorming'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.dsh', 'skills', 'brainstorming', 'SKILL.md'),
+      '# Brainstorming\n',
+      'utf8',
+    );
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, {
+        currentProject: true,
+        installMode: 'copy',
+        platform: 'dsh',
+        selfUpdate: true,
+      });
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(mockedInstallOpenSpec).toHaveBeenCalledWith(
+      tmpDir,
+      ['claude'],
+      'project',
+      expect.objectContaining({
+        shouldInstallCli: true,
+        mirrorPlatformIds: [],
+        artifactLayout: 'docs',
+        projectMutationGuard: expect.any(Function),
+        selectedPlatformIds: ['dsh'],
+      }),
+    );
+    expect(mockedInstallSuperpowers).toHaveBeenCalledWith(tmpDir, 'project', ['dsh'], true);
   });
 
   it.each(['missing', 'corrupt'] as const)(
@@ -2231,16 +2300,13 @@ describe('update command helpers', () => {
       const configPath = path.join(tmpDir, '.comet', 'config.yaml');
       const configBefore = await fs.readFile(configPath, 'utf8');
       mockedInstallOpenSpec.mockImplementationOnce(
-        async (
-          projectPath,
-          _toolIds,
-          scope,
-          _shouldInstallCli,
-          _mirrorOpenCodePlatformIds,
-          artifactLayout,
-        ) => {
+        async (projectPath, _toolIds, scope, options = {}) => {
           if (scope === 'project') {
-            await writeMockOpenSpecProject(projectPath, artifactLayout, openSpecConfig);
+            await writeMockOpenSpecProject(
+              projectPath,
+              options.artifactLayout ?? 'legacy',
+              openSpecConfig,
+            );
           }
           return 'installed';
         },
@@ -2353,14 +2419,13 @@ describe('update command helpers', () => {
       tmpDir,
       ['claude'],
       'project',
-      true,
-      [],
-      'legacy',
-      expect.any(Function),
-      undefined,
-      [],
-      [],
-      ['claude'],
+      expect.objectContaining({
+        shouldInstallCli: true,
+        mirrorPlatformIds: [],
+        artifactLayout: 'legacy',
+        projectMutationGuard: expect.any(Function),
+        selectedPlatformIds: ['claude'],
+      }),
     );
     await expect(fs.access(path.join(tmpDir, 'docs', 'openspec'))).rejects.toMatchObject({
       code: 'ENOENT',
@@ -2440,14 +2505,13 @@ describe('update command helpers', () => {
       tmpDir,
       ['claude'],
       'project',
-      true,
-      [],
-      'docs',
-      expect.any(Function),
-      undefined,
-      [],
-      [],
-      ['claude'],
+      expect.objectContaining({
+        shouldInstallCli: true,
+        mirrorPlatformIds: [],
+        artifactLayout: 'docs',
+        projectMutationGuard: expect.any(Function),
+        selectedPlatformIds: ['claude'],
+      }),
     );
   });
 
@@ -2484,14 +2548,13 @@ describe('update command helpers', () => {
       tmpDir,
       ['claude'],
       'project',
-      true,
-      [],
-      'docs',
-      expect.any(Function),
-      undefined,
-      [],
-      [],
-      ['claude'],
+      expect.objectContaining({
+        shouldInstallCli: true,
+        mirrorPlatformIds: [],
+        artifactLayout: 'docs',
+        projectMutationGuard: expect.any(Function),
+        selectedPlatformIds: ['claude'],
+      }),
     );
     await expect(
       fs.readFile(path.join(tmpDir, 'openspec', 'legacy-marker.txt'), 'utf8'),
@@ -2611,14 +2674,13 @@ describe('update command helpers', () => {
       tmpDir,
       [],
       'project',
-      true,
-      [],
-      'docs',
-      expect.any(Function),
-      undefined,
-      [],
-      [],
-      [],
+      expect.objectContaining({
+        shouldInstallCli: true,
+        mirrorPlatformIds: [],
+        artifactLayout: 'docs',
+        projectMutationGuard: expect.any(Function),
+        selectedPlatformIds: [],
+      }),
     );
   });
 
@@ -2661,14 +2723,13 @@ describe('update command helpers', () => {
       tmpDir,
       [],
       'project',
-      true,
-      [],
-      'docs',
-      expect.any(Function),
-      undefined,
-      [],
-      [],
-      [],
+      expect.objectContaining({
+        shouldInstallCli: true,
+        mirrorPlatformIds: [],
+        artifactLayout: 'docs',
+        projectMutationGuard: expect.any(Function),
+        selectedPlatformIds: [],
+      }),
     );
     await expect(fs.readFile(configPath)).resolves.toEqual(configBefore);
   });
@@ -2795,14 +2856,13 @@ describe('update command helpers', () => {
       tmpDir,
       ['claude'],
       'global',
-      true,
-      [],
-      'legacy',
-      undefined,
-      undefined,
-      [],
-      [],
-      ['claude'],
+      expect.objectContaining({
+        shouldInstallCli: true,
+        mirrorPlatformIds: [],
+        artifactLayout: 'legacy',
+        projectMutationGuard: undefined,
+        selectedPlatformIds: ['claude'],
+      }),
     );
     await expect(fs.access(path.join(tmpDir, 'openspec'))).rejects.toMatchObject({
       code: 'ENOENT',

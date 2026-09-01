@@ -15,11 +15,13 @@ import {
   ensureProtectedProjectDirectory,
   inspectProtectedProjectPath,
 } from '../workflow-contract/protected-project-path.js';
+import { addDshOwnedPaths, dshRootPath, readDshOwnedPaths } from '../skill/dsh-adapter.js';
 
 import type { InstallScope } from '../../platform/install/types.js';
 
 const VALID_TOOL_IDS = new Set(PLATFORMS.map((p) => p.openspecToolId));
 const MINIMUM_OPENSPEC_VERSION = '1.5.0';
+const OH_MY_PI_MINIMUM_OPENSPEC_VERSION = '1.6.0';
 const ALL_OPENSPEC_WORKFLOWS = [
   'propose',
   'explore',
@@ -37,6 +39,17 @@ const ALL_OPENSPEC_WORKFLOWS = [
 type ProjectMutationGuard = () => void | Promise<void>;
 type OpenSpecFailureObserver = (error: Error) => void;
 
+export interface OpenSpecInstallOptions {
+  shouldInstallCli?: boolean;
+  mirrorPlatformIds?: readonly string[];
+  artifactLayout?: 'legacy' | 'docs';
+  projectMutationGuard?: ProjectMutationGuard;
+  failureObserver?: OpenSpecFailureObserver;
+  extraMirrorPlatformIds?: readonly string[];
+  moreMirrorPlatformIds?: readonly string[];
+  selectedPlatformIds?: readonly string[];
+}
+
 class ProjectMutationGuardError extends Error {
   override readonly name = 'ProjectMutationGuardError';
 }
@@ -51,7 +64,7 @@ function getNpmExecutable(platform: NodeJS.Platform = process.platform): string 
 
 function buildOpenSpecInitInvocation(
   projectPath: string,
-  toolIds: string[],
+  toolIds: readonly string[],
   scope: InstallScope,
   homeDir = os.homedir(),
   includeProfileFlag = true,
@@ -87,7 +100,7 @@ async function assertProjectMutationAllowed(
 
 async function runOpenSpecInit(
   targetPath: string,
-  toolIds: string[],
+  toolIds: readonly string[],
   env: NodeJS.ProcessEnv,
   projectMutationGuard?: ProjectMutationGuard,
   projectMutationAlreadyStarted = false,
@@ -483,9 +496,12 @@ function parseSemanticVersion(value: string): SemanticVersion | null {
   };
 }
 
-function isOpenSpecVersionCompatible(versionOutput: string): boolean {
+function isOpenSpecVersionCompatible(
+  versionOutput: string,
+  minimumVersion = MINIMUM_OPENSPEC_VERSION,
+): boolean {
   const actual = parseSemanticVersion(versionOutput);
-  const minimum = parseSemanticVersion(MINIMUM_OPENSPEC_VERSION);
+  const minimum = parseSemanticVersion(minimumVersion);
   if (!actual || !minimum) return false;
   for (const field of ['major', 'minor', 'patch'] as const) {
     if (actual[field] > minimum[field]) return true;
@@ -518,14 +534,15 @@ export function isOpenSpecCliCompatible(): boolean {
 async function ensureOpenSpecCli(
   projectPath: string,
   shouldInstall = true,
+  minimumVersion = MINIMUM_OPENSPEC_VERSION,
 ): Promise<'ready' | 'missing' | 'incompatible' | 'failed'> {
   const alreadyInstalled = isCommandAvailable('openspec');
   if (!shouldInstall) {
     if (!alreadyInstalled) return 'missing';
     const version = getOpenSpecVersion();
-    if (version && isOpenSpecVersionCompatible(version)) return 'ready';
+    if (version && isOpenSpecVersionCompatible(version, minimumVersion)) return 'ready';
     console.error(
-      `    OpenSpec ${version || 'version unknown'} is incompatible; Comet requires >= ${MINIMUM_OPENSPEC_VERSION}. The OpenSpec upgrade was not selected; rerun comet init and select OpenSpec, or run: npm install -g @fission-ai/openspec@latest`,
+      `    OpenSpec ${version || 'version unknown'} is incompatible; Comet requires >= ${minimumVersion}. The OpenSpec upgrade was not selected; rerun comet init and select OpenSpec, or run: npm install -g @fission-ai/openspec@latest`,
     );
     return 'incompatible';
   }
@@ -549,14 +566,14 @@ async function ensureOpenSpecCli(
   } catch (error) {
     if (alreadyInstalled) {
       const version = getOpenSpecVersion();
-      if (version && isOpenSpecVersionCompatible(version)) {
+      if (version && isOpenSpecVersionCompatible(version, minimumVersion)) {
         console.warn(
           `    OpenSpec upgrade failed, using compatible existing version ${version}: ${(error as Error).message}`,
         );
         return 'ready';
       }
       console.error(
-        `    OpenSpec upgrade failed and existing ${version || 'version could not be read'} is incompatible; Comet requires >= ${MINIMUM_OPENSPEC_VERSION}.`,
+        `    OpenSpec upgrade failed and existing ${version || 'version could not be read'} is incompatible; Comet requires >= ${minimumVersion}.`,
       );
       printCommandErrorDetails(error);
       return 'incompatible';
@@ -684,19 +701,65 @@ function copyOpenSpecPaths(srcDir: string, destDir: string): void {
   }
 }
 
+async function copyDshOpenSpecPaths(
+  sourceBaseDir: string,
+  destinationBaseDir: string,
+  scope: InstallScope,
+  projectMutationGuard?: ProjectMutationGuard,
+): Promise<void> {
+  const dshPlatform = PLATFORMS.find((platform) => platform.id === 'dsh');
+  const claudePlatform = PLATFORMS.find((platform) => platform.id === 'claude');
+  if (!dshPlatform || !claudePlatform) return;
+
+  const sourceRoot = path.join(sourceBaseDir, getPlatformSkillsDir(claudePlatform, scope));
+  const destinationRoot = dshRootPath(destinationBaseDir, dshPlatform, scope);
+  const owned = await readDshOwnedPaths(destinationBaseDir, dshPlatform, scope, 'openspec');
+  const copied: string[] = [];
+
+  for (const directory of ['skills', 'commands']) {
+    const sourceDirectory = path.join(sourceRoot, directory);
+    if (!fs.existsSync(sourceDirectory)) continue;
+    for (const entry of fs.readdirSync(sourceDirectory, { withFileTypes: true })) {
+      const relative = `${directory}/${entry.name}`;
+      const source = path.join(sourceDirectory, entry.name);
+      const destination = path.join(destinationRoot, directory, entry.name);
+      if (fs.existsSync(destination) && !owned.has(relative)) continue;
+
+      if (scope === 'project') {
+        await copyGeneratedToolDirectory(
+          sourceBaseDir,
+          source,
+          destinationBaseDir,
+          destination,
+          projectMutationGuard,
+        );
+      } else {
+        fs.mkdirSync(path.dirname(destination), { recursive: true });
+        fs.cpSync(source, destination, { recursive: true, force: true });
+      }
+      copied.push(relative);
+    }
+  }
+
+  await addDshOwnedPaths(destinationBaseDir, dshPlatform, scope, 'openspec', copied);
+}
+
 async function installOpenSpec(
   projectPath: string,
-  toolIds: string[],
+  toolIds: readonly string[],
   scope: InstallScope,
-  shouldInstallCli = true,
-  mirrorPlatformIds: string[] = [],
-  artifactLayout: 'legacy' | 'docs' = 'legacy',
-  projectMutationGuard?: ProjectMutationGuard,
-  failureObserver?: OpenSpecFailureObserver,
-  extraMirrorPlatformIds: string[] = [],
-  moreMirrorPlatformIds: string[] = [],
-  selectedPlatformIds: string[] = [],
+  options: OpenSpecInstallOptions = {},
 ): Promise<'installed' | 'failed' | 'skipped'> {
+  const {
+    shouldInstallCli = true,
+    mirrorPlatformIds = [],
+    artifactLayout = 'legacy',
+    projectMutationGuard,
+    failureObserver,
+    extraMirrorPlatformIds = [],
+    moreMirrorPlatformIds = [],
+    selectedPlatformIds = [],
+  } = options;
   const allMirrorPlatformIds = [
     ...new Set([...mirrorPlatformIds, ...extraMirrorPlatformIds, ...moreMirrorPlatformIds]),
   ];
@@ -708,7 +771,10 @@ async function installOpenSpec(
       throw error;
     }
   }
-  const cliStatus = await ensureOpenSpecCli(projectPath, shouldInstallCli);
+  const minimumVersion = toolIds.includes('oh-my-pi')
+    ? OH_MY_PI_MINIMUM_OPENSPEC_VERSION
+    : MINIMUM_OPENSPEC_VERSION;
+  const cliStatus = await ensureOpenSpecCli(projectPath, shouldInstallCli, minimumVersion);
   if (cliStatus === 'failed' || cliStatus === 'incompatible') {
     return 'failed';
   }
@@ -725,6 +791,7 @@ async function installOpenSpec(
   let configBackup: ConfigBackup | null = null;
   let stagingProject: string | undefined;
   let generatedToolCopies: GeneratedToolCopy[] | undefined;
+  const dshSelected = selectedPlatformIds.includes('dsh') && toolIds.includes('claude');
   try {
     const openspecEnv = createOpenSpecAllWorkflowsEnv();
     configHome = openspecEnv.configHome;
@@ -732,7 +799,7 @@ async function installOpenSpec(
     configBackup = writeAllWorkflowsToDefaultConfig();
     const destBase = scope === 'global' ? os.homedir() : projectPath;
     const usesStagedToolCopy =
-      toolIds.length > 0 && (scope === 'project' || allMirrorPlatformIds.length > 0);
+      toolIds.length > 0 && (scope === 'project' || allMirrorPlatformIds.length > 0 || dshSelected);
 
     if (usesStagedToolCopy) {
       stagingProject = fs.mkdtempSync(path.join(os.tmpdir(), 'comet-openspec-tools-'));
@@ -780,9 +847,19 @@ async function installOpenSpec(
           projectMutationGuard,
         );
       }
+      if (dshSelected && stagingProject) {
+        await copyDshOpenSpecPaths(stagingProject, projectPath, 'project', projectMutationGuard);
+      }
       await assertProjectMutationAllowed(projectMutationGuard, 'after-external', true);
-    } else if (allMirrorPlatformIds.length > 0 && stagingProject && generatedToolCopies) {
+    } else if (
+      (allMirrorPlatformIds.length > 0 || dshSelected) &&
+      stagingProject &&
+      generatedToolCopies
+    ) {
       await mergeGeneratedToolDirectories(generatedToolCopies, stagingProject, destBase);
+      if (dshSelected) {
+        await copyDshOpenSpecPaths(stagingProject, destBase, scope);
+      }
     } else {
       await runOpenSpecInit(os.homedir(), toolIds, openspecEnv.env);
     }

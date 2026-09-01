@@ -1,13 +1,17 @@
 import type { NativeChildrenInspection } from './native-children.js';
 import type { NativePortableExpectedContinuationAction } from './native-portable-runtime.js';
-import type { NativePortableState } from './native-portable-types.js';
+import {
+  NATIVE_SUPERVISOR_COORDINATION_MODES,
+  type NativePortableState,
+} from './native-portable-types.js';
 
 type NativePortableContinuationInputOption = {
   name: string;
   flag: string;
-  valueKind: 'text' | 'confirmation' | 'json-file';
+  valueKind: 'text' | 'confirmation' | 'choice' | 'json-file';
   required: boolean;
   template: unknown | null;
+  choices?: string[];
 };
 
 type NativePortableCommandAlternative = {
@@ -26,6 +30,13 @@ export interface NativePortableRunnerAction {
   attempt: number;
 }
 
+export interface NativePortableUserCommunication {
+  required: boolean;
+  message: string | null;
+  suggestedReply: string | null;
+  agentInstruction: string;
+}
+
 export interface NativePortableContinuation {
   schema: 'comet.native.continuation.v2';
   skill: 'comet-native';
@@ -41,6 +52,7 @@ export interface NativePortableContinuation {
     | 'resolve-verifier-blocker'
     | 'resolve-loop-stop'
     | 'advance-children'
+    | 'advance-parent'
     | 'builder-handoff'
     | 'dispatch-verifier'
     | 'await-verifier'
@@ -53,6 +65,123 @@ export interface NativePortableContinuation {
   inputOptions: NativePortableContinuationInputOption[];
   commandAlternatives?: NativePortableCommandAlternative[];
   runnerAction: NativePortableRunnerAction;
+  userCommunication: NativePortableUserCommunication;
+}
+
+function localized(state: NativePortableState, english: string, chinese: string): string {
+  return state.language === 'zh-CN' ? chinese : english;
+}
+
+function nativePortableUserCommunication(
+  state: NativePortableState,
+  coordinationChoiceRequired: boolean,
+): NativePortableUserCommunication {
+  const noUserUpdate = (agentInstruction: string): NativePortableUserCommunication => ({
+    required: false,
+    message: null,
+    suggestedReply: null,
+    agentInstruction,
+  });
+
+  if (coordinationChoiceRequired && state.phase === 'shape' && state.status === 'active') {
+    return {
+      required: true,
+      message: localized(
+        state,
+        'This Supervisor Change has multiple independent children. Choose one coordination mode before confirming Shape: A) Multi-session coordination (recommended), or B) Single-session progression.',
+        '当前 Supervisor Change 包含多个可独立执行的 Child。确认 Shape 前请选择推进方式：A）多会话协作（推荐），或 B）单会话推进。',
+      ),
+      suggestedReply: localized(state, 'Reply A or B', '回复 A 或 B'),
+      agentInstruction: localized(
+        state,
+        'Relay the two coordination choices and wait for the user decision. Do not treat a generic confirmation as a mode selection or run --confirmed without --coordination-mode.',
+        '转述这两个推进方式并等待用户选择。不要把普通“确认”视为已选择推进方式，也不要在没有 --coordination-mode 时运行 --confirmed。',
+      ),
+    };
+  }
+
+  if (
+    state.phase === 'verify' &&
+    state.status === 'active' &&
+    state.loop.stage === 'verify-ready'
+  ) {
+    return noUserUpdate(
+      localized(
+        state,
+        'The current candidate and completed checks are preserved. Continue with dispatch-verifier without asking the user to recover files, processes, or workflow state. If a brief status update is necessary, say only that verification is being retried and the code is unchanged.',
+        '当前候选和已经完成的检查都已保留。直接继续 dispatch-verifier，不要让用户恢复文件、进程或工作流状态。如果确实需要简短同步进度，只说明正在重新尝试验收且代码没有变化。',
+      ),
+    );
+  }
+
+  if (
+    state.phase === 'verify' &&
+    state.status === 'active' &&
+    state.loop.next_action === 'await-verifier-result'
+  ) {
+    return noUserUpdate(
+      localized(
+        state,
+        'Wait only while the dispatched Verifier task is still active. If it did not start, ended without a response, or is no longer available, immediately submit the matching verifier-unavailable or verifier-execution-error input. Do not ask the user to recover files or processes, and do not expose attempt or requestCheckRounds.',
+        '仅在已派发的独立验收任务仍在运行时等待。如果任务未启动、结束后没有返回结果或已经丢失，立即提交匹配的 verifier-unavailable 或 verifier-execution-error 输入。不要让用户恢复文件或进程，也不要向用户展示 attempt、requestCheckRounds 等机器状态。',
+      ),
+    );
+  }
+
+  if (
+    state.status === 'blocked' &&
+    state.blockers.some(({ resolution_action }) => resolution_action === 'retry-verifier')
+  ) {
+    return state.language === 'zh-CN'
+      ? {
+          required: true,
+          message:
+            '由于独立验收任务连续几次没有正常返回结果，本次验收已暂停。你的代码和已经完成的检查都已安全保留。回复“继续”即可重新尝试，不需要处理文件或进程。',
+          suggestedReply: '继续',
+          agentInstruction:
+            '只向用户转述 message 和 suggestedReply，并等待用户回复。不要展示内部轮次、计数、路径或恢复步骤。',
+        }
+      : {
+          required: true,
+          message:
+            'Verification paused because the independent verification task repeatedly ended without a result. Your code and completed checks are safely preserved. Reply “Continue” to retry; you do not need to manage files or processes.',
+          suggestedReply: 'Continue',
+          agentInstruction:
+            'Relay only message and suggestedReply to the user, then wait for that reply. Do not expose internal attempts, counters, paths, or recovery steps.',
+        };
+  }
+
+  if (
+    state.phase === 'verify' &&
+    state.status === 'await-user' &&
+    state.verification?.assurance === 'semantic-verification-unavailable'
+  ) {
+    return state.language === 'zh-CN'
+      ? {
+          required: true,
+          message:
+            '由于独立验收服务暂时不可用，目前只能完成自动检查。你可以选择接受当前检查结果，或者等验收服务恢复后再重试。',
+          suggestedReply: null,
+          agentInstruction:
+            '向用户转述 message，并请用户明确选择是否接受只有自动检查的结果。不要把“继续”当作默认接受。',
+        }
+      : {
+          required: true,
+          message:
+            'Because independent verification is temporarily unavailable, only the automatic checks could be completed. You can accept the current check results or wait and retry when verification is available.',
+          suggestedReply: null,
+          agentInstruction:
+            'Relay message and ask the user to explicitly choose whether to accept automatic checks only. Do not treat “Continue” as implicit acceptance.',
+        };
+  }
+
+  return noUserUpdate(
+    localized(
+      state,
+      'Follow the continuation action. Unless required is true, continue without asking the user to handle internal workflow state, and do not present machine fields as a user-facing explanation.',
+      '按 continuation 执行下一步。除非 required 为 true，否则继续推进，不要让用户处理内部工作流状态，也不要把机器字段作为面向用户的说明。',
+    ),
+  );
 }
 
 function boundNativeNextCommandArgs(options: {
@@ -82,6 +211,42 @@ function textInput(name: string, flag: string): NativePortableContinuationInputO
 
 function confirmationInput(name: string, flag: string): NativePortableContinuationInputOption {
   return { name, flag, valueKind: 'confirmation', required: true, template: null };
+}
+
+function choiceInput(
+  name: string,
+  flag: string,
+  choices: readonly string[],
+): NativePortableContinuationInputOption {
+  return { name, flag, valueKind: 'choice', required: true, template: null, choices: [...choices] };
+}
+
+function supervisorCoordinationRequired(children?: NativeChildrenInspection | null): boolean {
+  return (
+    children?.coordinationChoiceRequired === true ||
+    (children?.schema === 'comet.native.children.v2' && children.children.length >= 2)
+  );
+}
+
+function boundNativeShapeCommandArgs(options: {
+  change: string;
+  stateVersion: number;
+  coordinationRequired: boolean;
+}): string[] {
+  return [
+    'comet',
+    'native',
+    'next',
+    options.change,
+    '--summary',
+    '<summary>',
+    ...(options.coordinationRequired ? ['--coordination-mode', '<coordination-mode>'] : []),
+    '--confirmed',
+    '--expected-state-version',
+    String(options.stateVersion),
+    '--expected-action',
+    'confirm-shape',
+  ];
 }
 
 function nativeNextDecisionAlternative(options: {
@@ -138,6 +303,8 @@ export function nativePortableContinuation(
   state: NativePortableState,
   children?: NativeChildrenInspection | null,
 ): NativePortableContinuation {
+  const coordinationRequired =
+    supervisorCoordinationRequired(children) && state.coordination_mode === undefined;
   const base = {
     schema: 'comet.native.continuation.v2' as const,
     skill: 'comet-native' as const,
@@ -146,6 +313,7 @@ export function nativePortableContinuation(
     status: state.status,
     stateVersion: state.state_version,
     inputOptions: [] as NativePortableContinuation['inputOptions'],
+    userCommunication: nativePortableUserCommunication(state, coordinationRequired),
   };
   const runner = (kind: NativePortableRunnerAction['kind']): NativePortableRunnerAction => ({
     kind,
@@ -311,15 +479,18 @@ export function nativePortableContinuation(
   if (state.phase === 'shape') {
     return {
       ...base,
-      disposition: 'continue',
+      disposition: coordinationRequired ? 'await-user' : 'continue',
       action: 'confirm-shape',
-      commandArgs: boundNativeNextCommandArgs({
+      commandArgs: boundNativeShapeCommandArgs({
         change: state.name,
         stateVersion: state.state_version,
-        action: 'confirm-shape',
-        flag: '--confirmed',
+        coordinationRequired,
       }),
-      requiredInputs: ['summary', 'shared-understanding-confirmation'],
+      requiredInputs: [
+        'summary',
+        ...(coordinationRequired ? ['coordination-choice'] : []),
+        'shared-understanding-confirmation',
+      ],
       inputOptions: [
         {
           name: 'summary',
@@ -328,13 +499,16 @@ export function nativePortableContinuation(
           required: true,
           template: null,
         },
-        {
-          name: 'confirmed',
-          flag: '--confirmed',
-          valueKind: 'confirmation',
-          required: true,
-          template: null,
-        },
+        ...(coordinationRequired
+          ? [
+              choiceInput(
+                'coordination-mode',
+                '--coordination-mode',
+                NATIVE_SUPERVISOR_COORDINATION_MODES,
+              ),
+            ]
+          : []),
+        confirmationInput('confirmed', '--confirmed'),
       ],
       runnerAction: runner('none'),
     };
@@ -375,22 +549,42 @@ export function nativePortableContinuation(
         return {
           ...base,
           disposition: 'continue',
-          action: 'advance-children',
-          commandArgs: ['comet', 'native', 'next', state.name, '--summary', '<summary>'],
-          requiredInputs: ['summary'],
+          action: 'builder-handoff',
+          commandArgs: [
+            'comet',
+            'native',
+            'next',
+            state.name,
+            '--runner-input',
+            '<temporary-json-file>',
+          ],
+          requiredInputs: ['builder-handoff-json-file'],
           inputOptions: [
             {
-              name: 'summary',
-              flag: '--summary',
-              valueKind: 'text',
+              name: 'runner-input',
+              flag: '--runner-input',
+              valueKind: 'json-file',
               required: true,
-              template: null,
+              template: {
+                kind: 'builder-handoff',
+                summary: '<summary>',
+                addressed_acceptance_ids: ['<acceptance-id>'],
+                checks: [{ name: '<check-name>', result: 'not-run', note: null }],
+                known_limits: [],
+                review: {
+                  status: 'passed',
+                  summary: '<review-summary>',
+                  reviewer_execution_ref: '<reviewer-execution-ref>',
+                },
+              },
             },
           ],
-          runnerAction: runner('none'),
+          runnerAction: runner('builder-handoff'),
         };
       }
-      const blocked = children.children.some(({ status }) => status === 'blocked');
+      const blocked = children.children.some(
+        ({ status }) => status === 'blocked' || status === 'needs-reverify',
+      );
       const progressing = children.children.some(
         ({ status }) => status === 'ready' || status === 'active',
       );
@@ -429,6 +623,11 @@ export function nativePortableContinuation(
             addressed_acceptance_ids: ['<acceptance-id>'],
             checks: [{ name: '<check-name>', result: 'not-run', note: null }],
             known_limits: [],
+            review: {
+              status: 'passed',
+              summary: '<review-summary>',
+              reviewer_execution_ref: '<reviewer-execution-ref>',
+            },
           },
         },
       ],
@@ -437,8 +636,29 @@ export function nativePortableContinuation(
   }
   if (state.phase === 'verify') {
     const awaiting = state.loop.next_action === 'await-verifier-result';
+    const supervisor = Boolean(state.children_contract_hash);
+    const checkTemplate = {
+      id: '<check-id>',
+      name: '<check-name>',
+      executable: '<executable>',
+      argv: [],
+      cwdRef: '.',
+      timeoutMs: 120000,
+      repeatable: true,
+    };
     return {
       ...base,
+      userCommunication:
+        !awaiting && supervisor
+          ? {
+              ...base.userCommunication,
+              agentInstruction: `${base.userCommunication.agentInstruction} ${localized(
+                state,
+                'Resolve at least one integration check for the Supervisor parent; cwdRef is relative to the integration worktree.',
+                '为 Supervisor 父级解析至少一项集成检查；cwdRef 相对于集成工作区。',
+              )}`,
+            }
+          : base.userCommunication,
       disposition: 'continue',
       action: awaiting ? 'await-verifier' : 'dispatch-verifier',
       commandArgs: [
@@ -466,17 +686,7 @@ export function nativePortableContinuation(
                     kind: 'request-checks',
                     iteration: state.loop.iteration,
                     attempt: state.loop.attempt,
-                    checks: [
-                      {
-                        id: '<check-id>',
-                        name: '<check-name>',
-                        executable: '<executable>',
-                        argv: [],
-                        cwdRef: '.',
-                        timeoutMs: 120000,
-                        repeatable: true,
-                      },
-                    ],
+                    checks: [checkTemplate],
                   },
                 },
                 {
@@ -516,7 +726,7 @@ export function nativePortableContinuation(
                   verifierExecutionRef: '<from verifierDispatch>',
                 },
               ]
-            : { kind: 'dispatch-verifier', checks: [] },
+            : { kind: 'dispatch-verifier', checks: supervisor ? [checkTemplate] : [] },
         },
       ],
       runnerAction: runner(awaiting ? 'await-verifier' : 'dispatch-verifier'),

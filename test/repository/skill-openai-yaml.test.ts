@@ -24,7 +24,7 @@ const implicitlyInvocableSkills = new Set([
   'comet-tweak',
 ]);
 const alwaysModelInvocableSkills = new Set(['comet', 'comet-classic', 'comet-native']);
-const explicitOnlySkills = new Set(['comet-review', 'comet-any']);
+const explicitOnlySkills = new Set(['comet-review', 'comet-any', 'comet-memory']);
 
 async function readSkillFrontmatter(skillRoot: string, skillName: string): Promise<Set<string>> {
   const content = await fs.readFile(path.resolve(skillRoot, skillName, 'SKILL.md'), 'utf8');

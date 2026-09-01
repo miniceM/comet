@@ -33,6 +33,8 @@ Before starting, use `comet-classic/reference/scripts.md` to run the public Come
 
 When resuming an existing tweak change, the first state operation must be `comet state select <change-name>`. For a new change, run the command immediately after `.comet.yaml` initialization and before source writes.
 
+After entering the tweak workspace and reading `phase`, run `comet task <project-root> --task "<original user request>" --phase "<phase>" --session "<stable task id>" --json`. Inject only returned `text`; the Context Manifest (`manifest` / `<context_manifest>`) contains summaries, application reasons, and stable IDs. Add `--expand-context "<id>"` for full content, sources, or verification, and select again with the same `--session` when path, operation, or phase changes. Use `comet memory remember ... --scope global|project` for an explicit long-term request and `comet memory observe` only for an implicit but reusable stable habit; never save task summaries, progress, command output, or test results. After actually using an item, take `applications[].applicationId` from JSON (or `application_id` from Hook context) and report the known result with `comet task <project-root> --task "<original user request>" --application "<application-id>" --outcome used-successfully|ignored|overridden|corrected|contributed-to-failure --json`. At task end still run `comet task` with `--complete --workflow <workflow> --change <change-id>`. Without Hooks this Skill uses the same interface and `comet memory context` is only a compatibility entry; plugin failure never blocks the change.
+
 ### 1. Quick Open (preset open)
 
 Reuse Comet open capability to create change, but use tweak defaults: do not execute `openspec-explore` long exploration, directly enter streamlined change creation.
@@ -158,7 +160,7 @@ The following genuine user decisions still pause:
 
 1. Encountering an upgrade-assessment signal (see "Upgrade Assessment" section). **Pause, present the choices, and wait for the user to explicitly choose**: continue the tweak lightweight flow, or upgrade to the full `/comet-classic` workflow
 2. Verify-phase acceptance of WARNING/SUGGESTION deviations, Spec drift handling, or strategy after the automatic repair limit; the first 3 clearly repairable failures close automatically
-3. Final archive confirmation and the branch-handling decision after the archive commit
+3. One final pre-archive confirmation chooses whether to archive and how to deliver the archive commit
 
 Execution order: quick open → build (with upgrade assessment) → verification → archive → complete
 

@@ -72,15 +72,17 @@ describe('enterprise guard managed Hook lifecycle', () => {
     expect(inspection.duplicatePresent).toBeUndefined();
 
     const afterInstall = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as {
-      hooks: { PreToolUse: Array<{ hooks: Array<{ command: string }> }> };
+      hooks: { PreToolUse: Array<{ hooks: Array<{ command: string; args?: string[] }> }> };
     };
-    const commands = afterInstall.hooks.PreToolUse.flatMap((group) =>
-      group.hooks.map((hook) => hook.command),
-    );
-    expect(commands).toContain('node user-hook.mjs');
-    expect(commands).toContain(routerCommand);
+    const installedHooks = afterInstall.hooks.PreToolUse.flatMap((group) => group.hooks);
+    expect(installedHooks).toContainEqual({ type: 'command', command: 'node user-hook.mjs' });
+    expect(installedHooks).toContainEqual({ type: 'command', command: routerCommand });
     expect(
-      commands.filter((command) => command.includes('comet-enterprise-hook.mjs')),
+      installedHooks.filter(
+        (hook) =>
+          hook.command.includes('comet-enterprise-hook.mjs') ||
+          (hook.args ?? []).some((arg) => arg.includes('comet-enterprise-hook.mjs')),
+      ),
     ).toHaveLength(1);
 
     await expect(removeEnterpriseGuard(temporaryRoot, claude, 'project')).resolves.toEqual({

@@ -1,6 +1,6 @@
 {
   "name": "@rpamis/comet",
-  "version": "0.4.0-beta.22",
+  "version": "0.4.0-rc.2",
   "description": "Agent Skill Harness For Turning Ideas Into Evaluated Workflows",
   "keywords": [
     "comet",
@@ -48,6 +48,7 @@
   "scripts": {
     "build": "node build.js",
     "build:dashboard": "vite build --config domains/dashboard/web/vite.config.mjs",
+    "build:website-dashboard-demo": "node scripts/build/build-website-dashboard-demo.mjs",
     "dev:dashboard": "node scripts/dev-dashboard.mjs",
     "build:classic-runtime": "node scripts/build/build-classic-runtime.mjs",
     "build:native-runtime": "node scripts/build/build-native-runtime.mjs",
@@ -74,6 +75,8 @@
     "benchmark:classic": "node scripts/benchmark/classic-baseline-regression.mjs",
     "benchmark:bundle": "pnpm build && node scripts/benchmark/comet-bundle-compatibility-benchmark.mjs",
     "prepare": "node scripts/release/prepare.js",
+    "prepack": "node scripts/release/npm-readme.mjs apply",
+    "postpack": "node scripts/release/npm-readme.mjs restore",
     "prepublishOnly": "node scripts/release/prepublish-check.js && node build.js",
     "postinstall": "node scripts/install/postinstall.js"
   },
@@ -105,6 +108,7 @@
     "node": ">=22"
   },
   "devDependencies": {
+    "@ant-design/cssinjs": "2.1.2",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.3.1",
@@ -118,6 +122,7 @@
     "husky": "^9.1.7",
     "jsdom": "^29.1.1",
     "lint-staged": "^17.0.7",
+    "postcss": "8.5.25",
     "prettier": "^3.8.3",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -129,12 +134,13 @@
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",
-    "@fission-ai/openspec": "^1.5.0",
+    "@fission-ai/openspec": "^1.6.0",
     "@inquirer/ansi": "^2.0.5",
     "@inquirer/core": "^11.1.10",
     "@inquirer/figures": "^2.0.5",
     "@inquirer/prompts": "^8.4.3",
     "@inquirer/type": "^4.0.5",
+    "@vscode/ripgrep": "^1.18.0",
     "ajv": "^8.17.1",
     "antd": "^6.5.2",
     "commander": "^14.0.0",

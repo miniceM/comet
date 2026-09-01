@@ -60,6 +60,43 @@ Module._load = function(request, parent, isMain) { if (/langsmith|langfuse|anthr
   return { marker, bin, preload };
 }
 
+async function createPackSource(): Promise<string> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'comet-eval-pack-source-'));
+  temporary.push(root);
+  const source = path.join(root, 'source');
+  const archive = path.join(root, 'repository.tar');
+  await fs.mkdir(source);
+
+  const archived = spawnSync('git', ['archive', '--format=tar', '--output', archive, 'HEAD'], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  });
+  if (archived.status !== 0) {
+    throw new Error(`git archive failed: ${archived.stderr || archived.stdout}`);
+  }
+  const extracted = spawnSync('tar', ['-xf', archive, '-C', source], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  });
+  if (extracted.status !== 0) {
+    throw new Error(`tar extraction failed: ${extracted.stderr || extracted.stdout}`);
+  }
+
+  await Promise.all([
+    fs.copyFile(path.join(process.cwd(), 'package.json'), path.join(source, 'package.json')),
+    fs.copyFile(path.join(process.cwd(), '.npmignore'), path.join(source, '.npmignore')),
+    fs.cp(path.join(process.cwd(), 'assets'), path.join(source, 'assets'), {
+      recursive: true,
+      force: true,
+    }),
+    fs.cp(path.join(process.cwd(), 'dist'), path.join(source, 'dist'), {
+      recursive: true,
+      force: true,
+    }),
+  ]);
+  return source;
+}
+
 function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, shell = false) {
   return spawnSync(command, args, {
     cwd,
@@ -88,6 +125,7 @@ describe('packaged static collect', () => {
     temporary.push(owner);
     const packageDir = path.join(owner, 'package');
     await fs.mkdir(packageDir);
+    const packSource = await createPackSource();
     const isolatedEnv = {
       ...process.env,
       npm_config_ignore_scripts: 'true',
@@ -99,7 +137,7 @@ describe('packaged static collect', () => {
     const pack = run(
       'pnpm',
       ['pack', '--pack-destination', packageDir],
-      process.cwd(),
+      packSource,
       isolatedEnv,
       process.platform === 'win32',
     );
@@ -288,13 +326,14 @@ describe('packaged static collect', () => {
     );
     expect(corrupt.status, `${corrupt.stdout}\n${corrupt.stderr}`).toBe(0);
     expect(corrupt.stdout.split(/\r?\n/u)).toContain('Tasks: pending generation');
-  });
+  }, 300_000);
 
   it('proves taskless collect is zero-workload at the real packaged CLI boundary', async () => {
     const owner = await fs.mkdtemp(path.join(os.tmpdir(), 'comet-eval-sentinel-owner-'));
     temporary.push(owner);
     const packageDir = path.join(owner, 'package');
     await fs.mkdir(packageDir);
+    const packSource = await createPackSource();
     const baseEnv = {
       ...process.env,
       npm_config_ignore_scripts: 'true',
@@ -308,7 +347,7 @@ describe('packaged static collect', () => {
     const pack = run(
       'pnpm',
       ['pack', '--pack-destination', packageDir],
-      process.cwd(),
+      packSource,
       baseEnv,
       process.platform === 'win32',
     );
@@ -374,5 +413,5 @@ describe('packaged static collect', () => {
     }
     await expect(fs.stat(sentinels.marker)).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await snapshotTree(harnessRoot)).toEqual(harnessBefore);
-  });
+  }, 300_000);
 });

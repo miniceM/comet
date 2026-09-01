@@ -75,6 +75,13 @@ describe('Native artifact root moves', () => {
       default_workflow: 'native',
       workflows: ['native'],
       ambient_resume: true,
+      memory: {
+        learning: true,
+        retrieval: true,
+      },
+      knowledge: {
+        provider: 'local',
+      },
       native: {
         artifact_root: to,
         language: 'en',
