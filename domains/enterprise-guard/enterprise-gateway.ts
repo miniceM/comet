@@ -11,7 +11,7 @@ import type {
   CometHookRequest,
 } from '../comet-entry/hook-types.js';
 import { inspectCometHook } from '../comet-entry/hook-router.js';
-import { projectRootFrom } from '../comet-entry/hook-router-entry.js';
+import { projectRootFrom } from '../comet-entry/hook-project-root.js';
 import { runWithHookReadCache } from '../../platform/process/hook-read-cache.js';
 import type { GuardServiceRequest } from './guard-service.js';
 import { evaluateEnterpriseGuardSource } from './guard-service.js';
@@ -35,6 +35,7 @@ interface ParsedGatewayArgs {
   projectRoot?: string;
 }
 
+// Keep these error semantics in sync with parseArgs in domains/comet-entry/hook-router-entry.ts.
 function parseGatewayArgs(args: readonly string[]): ParsedGatewayArgs {
   let platformId: string | undefined;
   let projectRoot: string | undefined;

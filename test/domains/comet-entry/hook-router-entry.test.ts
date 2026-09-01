@@ -9,7 +9,6 @@ import { inspectCometHook } from '../../../domains/comet-entry/hook-router.js';
 import {
   main,
   isDirectEntry,
-  projectRootFrom,
   runCometHookRouter,
 } from '../../../domains/comet-entry/hook-router-entry.js';
 import { resolveCometHookProjectRoot } from '../../../domains/comet-entry/hook-project-root.js';
@@ -18,9 +17,17 @@ vi.mock('../../../domains/comet-entry/hook-router.js', () => ({
   inspectCometHook: vi.fn(),
 }));
 
-vi.mock('../../../domains/comet-entry/hook-project-root.js', () => ({
-  resolveCometHookProjectRoot: vi.fn((root: string) => root),
-}));
+vi.mock('../../../domains/comet-entry/hook-project-root.js', () => {
+  const resolveCometHookProjectRoot = vi.fn((root: string) => root);
+  return {
+    resolveCometHookProjectRoot,
+    projectRootFrom: vi.fn((parsed: { projectRoot?: string }, request?: unknown) =>
+      request
+        ? resolveCometHookProjectRoot(parsed.projectRoot ?? '', request)
+        : (parsed.projectRoot ?? null),
+    ),
+  };
+});
 
 describe('Comet Hook Router entry', () => {
   let stderr: ReturnType<typeof vi.spyOn>;
@@ -82,15 +89,6 @@ describe('Comet Hook Router entry', () => {
     expect(stderr).toHaveBeenCalledWith(
       expect.stringContaining('Comet Hook Router failed closed during project discovery'),
     );
-  });
-
-  it('resolves explicit roots and keeps a legacy invocation neutral without a request cwd', async () => {
-    const parsed = { platformId: 'codex' } as Parameters<typeof projectRootFrom>[0];
-    await expect(projectRootFrom(parsed)).resolves.toBeNull();
-    await expect(projectRootFrom(parsed, undefined)).resolves.toBeNull();
-    await expect(
-      projectRootFrom({ platformId: 'codex', projectRoot: path.resolve('project') }),
-    ).resolves.toBe(path.resolve('project'));
   });
 
   it.skipIf(process.platform === 'win32')(

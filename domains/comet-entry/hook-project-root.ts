@@ -1,8 +1,18 @@
 import { promises as fs, realpathSync } from 'fs';
 import path from 'path';
 
+import { discoverNativeProject } from '../comet-native/native-paths.js';
+import {
+  assertClassicLayoutReadable,
+  discoverClassicProject,
+} from '../comet-classic/classic-layout.js';
 import { listGitWorktreeRoots } from '../../platform/paths/git-worktree.js';
 import type { CometHookRequest } from './hook-types.js';
+
+interface ParsedHookArgs {
+  platformId: string;
+  projectRoot?: string;
+}
 
 function physicalPath(value: string): string {
   const resolved = path.resolve(value);
@@ -109,4 +119,40 @@ export async function resolveCometHookProjectRoot(
     await assertRebasedWorktreeReady(selected.physicalRoot);
   }
   return selected.logicalRoot ?? selected.physicalRoot;
+}
+
+export async function projectRootFrom(
+  parsed: ParsedHookArgs,
+  request?: CometHookRequest,
+): Promise<string | null> {
+  if (parsed.projectRoot) {
+    return request ? resolveCometHookProjectRoot(parsed.projectRoot, request) : parsed.projectRoot;
+  }
+  // A Router without --project-root is a legacy/global installation. It must
+  // use the host-provided working directory when one is available; the
+  // process cwd is often the directory where the global Hook was installed,
+  // not the project that owns the current tool request. Without a trusted
+  // request cwd there is no safe project to inspect, so leave the legacy Hook
+  // neutral instead of applying another project's phase guard.
+  if (!request?.cwd) return null;
+
+  const discoveryStart = request.cwd;
+  const discovered = await discoverNativeProject(discoveryStart);
+  for (const marker of [['.comet', 'config.yaml'], ['.git']]) {
+    try {
+      await fs.lstat(path.join(discovered, ...marker));
+      return discovered;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  const classic = await discoverClassicProject(discoveryStart);
+  const layout = await assertClassicLayoutReadable(classic);
+  try {
+    await fs.lstat(layout.changesDir);
+    return classic;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  return null;
 }

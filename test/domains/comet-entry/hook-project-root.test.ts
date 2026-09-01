@@ -4,7 +4,10 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { resolveCometHookProjectRoot } from '../../../domains/comet-entry/hook-project-root.js';
+import {
+  resolveCometHookProjectRoot,
+  projectRootFrom,
+} from '../../../domains/comet-entry/hook-project-root.js';
 
 describe('Comet Hook worktree project root', () => {
   let primary: string;
@@ -91,5 +94,16 @@ describe('Comet Hook worktree project root', () => {
         cwd: secondary,
       }),
     ).rejects.toThrow('linked worktree');
+  });
+});
+
+describe('Comet Hook project root discovery', () => {
+  it('resolves explicit roots and keeps a legacy invocation neutral without a request cwd', async () => {
+    const parsed = { platformId: 'codex' } as Parameters<typeof projectRootFrom>[0];
+    await expect(projectRootFrom(parsed)).resolves.toBeNull();
+    await expect(projectRootFrom(parsed, undefined)).resolves.toBeNull();
+    await expect(
+      projectRootFrom({ platformId: 'codex', projectRoot: path.resolve('project') }),
+    ).resolves.toBe(path.resolve('project'));
   });
 });
