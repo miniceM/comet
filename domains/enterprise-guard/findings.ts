@@ -6,7 +6,7 @@ import type {
   EnterpriseGuardDecision,
   EnterpriseHookInput,
   EnterpriseRuleResult,
-} from './policy-engine.js';
+} from './normalized-event.js';
 
 const FINDINGS_FILE_NAME = 'findings.jsonl';
 const LOCK_SUFFIX = '.lock';
