@@ -1,8 +1,8 @@
 # Enterprise Guard 设计基线
 
-> 版本：v1.0 · 最后更新：2026-08-28 · 负责人：Comet maintainers · 评审：Proposed（Issue #2）
+> 版本：v1.1 · 最后更新：2026-09-01 · 负责人：Comet maintainers · 评审：Proposed（Issue #2）
 
-本目录是 Enterprise Guard 的可引用设计基线，对应 [Issue #2](https://github.com/miniceM/comet/issues/2)，并作为 [Issue #1](https://github.com/miniceM/comet/issues/1) 与后续实现 Issue 的前置依赖。当前覆盖结论见 [平台覆盖能力报告](platform-coverage.md)，对应 [Issue #5](https://github.com/miniceM/comet/issues/5)。
+本目录是 Enterprise Guard 的可引用设计基线，对应 [Issue #2](https://github.com/miniceM/comet/issues/2)，并作为 [Issue #1](https://github.com/miniceM/comet/issues/1) 与后续实现 Issue 的前置依赖。当前覆盖结论见 [平台覆盖能力报告](platform-coverage.md)，对应 [Issue #5](https://github.com/miniceM/comet/issues/5)：唯一强制阻断平台 Claude Code 由单一 `comet-enterprise-gateway.mjs` 本地入口承载（Guard 先于项目发现与 Hook Router），覆盖等级与各平台宿主能力登记以覆盖报告为准。
 
 ## 目标与边界
 

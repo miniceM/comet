@@ -2,6 +2,12 @@
 
 All notable changes to @rpamis/comet will be documented in this file.
 
+## What's Changed [0.4.0-beta.23] - 2026-09-01
+
+### Changed
+
+- **Enterprise Guard gateway**: Claude Code now evaluates enterprise hard rules and Comet workflow routing through one ordered local hook, so hard-rule enforcement runs before project discovery without relying on multi-hook ordering.
+
 ## What's Changed [0.4.0-beta.22] - 2026-08-31
 
 ### Added
