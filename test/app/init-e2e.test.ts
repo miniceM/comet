@@ -51,7 +51,7 @@ function isNativeInstallSkillPath(skillPath: string): boolean {
     skillPath === 'comet/SKILL.md' ||
     skillPath.startsWith('comet-review/') ||
     skillPath === 'comet/scripts/comet-entry-runtime.mjs' ||
-    skillPath === 'comet/scripts/comet-enterprise-hook.mjs' ||
+    skillPath === 'comet/scripts/comet-enterprise-gateway.mjs' ||
     skillPath === 'comet/scripts/comet-hook-router.mjs' ||
     skillPath.startsWith('comet-native/') ||
     skillPath.startsWith('comet-any/')
@@ -362,7 +362,7 @@ describe('comet init E2E', () => {
       ).resolves.toBeDefined();
       await expect(
         fs.readFile(path.join(tmpDir, '.claude', 'settings.local.json'), 'utf8'),
-      ).resolves.toContain('comet-enterprise-hook.mjs');
+      ).resolves.toContain('comet-enterprise-gateway.mjs');
 
       const projectConfig = await fs.readFile(path.join(tmpDir, '.comet', 'config.yaml'), 'utf8');
       expect(projectConfig).toContain('default_workflow: native');
@@ -383,6 +383,49 @@ describe('comet init E2E', () => {
             call[1].includes('skills'),
         ),
       ).toBe(false);
+    },
+    INIT_E2E_TIMEOUT_MS,
+  );
+
+  it(
+    'installs exactly one managed Enterprise Gateway for Claude and preserves user hooks',
+    async () => {
+      mockExternalSuccess();
+      await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
+      await fs.writeFile(
+        path.join(tmpDir, '.claude', 'settings.local.json'),
+        JSON.stringify(
+          {
+            hooks: {
+              PreToolUse: [
+                {
+                  matcher: 'Write|Edit',
+                  hooks: [{ type: 'command', command: 'node user-hook.mjs' }],
+                },
+              ],
+            },
+          },
+          null,
+          2,
+        ),
+        'utf8',
+      );
+
+      const { initCommand } = await import('../../app/commands/init.js');
+      await captureJsonOutput(() => initCommand(tmpDir, { yes: true, json: true }));
+
+      const settings = JSON.parse(
+        await fs.readFile(path.join(tmpDir, '.claude', 'settings.local.json'), 'utf8'),
+      ) as { hooks: { PreToolUse: Array<{ hooks: Array<{ command: string }> }> } };
+      const commands = settings.hooks.PreToolUse.flatMap((group) =>
+        group.hooks.map((hook) => hook.command),
+      );
+      expect(
+        commands.filter((command) => command.includes('comet-enterprise-gateway.mjs')),
+      ).toHaveLength(1);
+      expect(commands.some((command) => command.includes('comet-hook-router.mjs'))).toBe(false);
+      expect(commands.some((command) => command.includes('comet-enterprise-hook.mjs'))).toBe(false);
+      expect(commands).toContain('node user-hook.mjs');
     },
     INIT_E2E_TIMEOUT_MS,
   );
