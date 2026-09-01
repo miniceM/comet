@@ -10,6 +10,7 @@ import {
   type HookInspectionResult,
 } from '../skill/platform-inspect.js';
 import { removeManagedHooksForPlatform, type RemovalResult } from '../skill/uninstall.js';
+import { enterpriseGuardCoverage, isEnterpriseGuardEnforcedPlatform } from './platform-coverage.js';
 
 export const ENTERPRISE_GUARD_HOOK_OWNER = 'comet.enterprise-guard.v1';
 
@@ -23,7 +24,11 @@ export const enterpriseGuardHookConfig: Record<string, HookConfig> = {
 };
 
 function supportsEnterpriseGuard(platform: Platform): boolean {
-  return platform.id === 'claude' && platform.hookFormat === 'claude-code';
+  return platform.hookFormat === 'claude-code' && isEnterpriseGuardEnforcedPlatform(platform);
+}
+
+function unsupportedPlatformReason(platform: Platform): string {
+  return `Enterprise Guard uses ${enterpriseGuardCoverage(platform).fallback} on ${platform.name}`;
 }
 
 export async function installEnterpriseGuard(
@@ -32,7 +37,7 @@ export async function installEnterpriseGuard(
   scope: InstallScope,
 ): Promise<HookInstallResult> {
   if (!supportsEnterpriseGuard(platform)) {
-    return { status: 'skipped', reason: 'enterprise guard prototype supports Claude Code only' };
+    return { status: 'skipped', reason: unsupportedPlatformReason(platform) };
   }
   return installManagedHooksForPlatform(baseDir, platform, scope, enterpriseGuardHookConfig, {
     allowGlobal: true,

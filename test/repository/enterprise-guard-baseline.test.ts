@@ -11,6 +11,7 @@ const artifacts = [
   'policy.md',
   'threat-model.md',
   'platform-capability-matrix.md',
+  'platform-coverage.md',
 ];
 
 interface ContractSchema {
@@ -46,15 +47,17 @@ describe('enterprise guard design baseline', () => {
     ).filter((artifact): artifact is string => artifact !== null);
     expect(missing).toEqual([]);
 
-    const [input, result, exception, index, policy, threatModel, matrix] = await Promise.all([
-      readSchema('contracts/enterprise-hook-input.v1.schema.json'),
-      readSchema('contracts/enterprise-rule-result.v1.schema.json'),
-      readSchema('contracts/enterprise-exception.v1.schema.json'),
-      readText('README.md'),
-      readText('policy.md'),
-      readText('threat-model.md'),
-      readText('platform-capability-matrix.md'),
-    ]);
+    const [input, result, exception, index, policy, threatModel, matrix, coverageReport] =
+      await Promise.all([
+        readSchema('contracts/enterprise-hook-input.v1.schema.json'),
+        readSchema('contracts/enterprise-rule-result.v1.schema.json'),
+        readSchema('contracts/enterprise-exception.v1.schema.json'),
+        readText('README.md'),
+        readText('policy.md'),
+        readText('threat-model.md'),
+        readText('platform-capability-matrix.md'),
+        readText('platform-coverage.md'),
+      ]);
 
     expect(input.$schema).toBe('https://json-schema.org/draft/2020-12/schema');
     expect(input.additionalProperties).toBe(false);
@@ -125,5 +128,12 @@ describe('enterprise guard design baseline', () => {
     expect(matrix).toContain('未验证的平台禁止标记为“强制阻断”');
     expect(matrix).toContain('CI 兜底');
     expect(matrix).toContain('install / update / doctor / uninstall');
+    expect(coverageReport).toContain('Claude Code');
+    expect(coverageReport).toContain('强制阻断（项目级）');
+    expect(coverageReport).toContain('Write、Edit、Bash');
+    expect(coverageReport).toContain('规则注入 + CI 兜底');
+    expect(coverageReport).toContain('不抵御能够修改本地 Hook、配置或脚本的恶意主体');
+    expect(matrix).toContain('Claude Code 已完成可重复项目级 Spike');
+    expect(matrix).toContain('其他平台仍不属于强制阻断覆盖');
   });
 });

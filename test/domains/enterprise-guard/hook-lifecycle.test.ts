@@ -14,10 +14,12 @@ import { PLATFORMS } from '../../../platform/install/platforms.js';
 describe('enterprise guard managed Hook lifecycle', () => {
   let temporaryRoot: string;
   const claude = PLATFORMS.find((platform) => platform.id === 'claude');
+  const codex = PLATFORMS.find((platform) => platform.id === 'codex');
 
   beforeEach(async () => {
     temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'comet-enterprise-guard-'));
     expect(claude).toBeDefined();
+    expect(codex).toBeDefined();
   });
 
   afterEach(async () => {
@@ -89,5 +91,22 @@ describe('enterprise guard managed Hook lifecycle', () => {
     expect(afterUninstall).toContain('node user-hook.mjs');
     expect(afterUninstall).toContain('comet-hook-router.mjs');
     expect(afterUninstall).not.toContain('comet-enterprise-hook.mjs');
+  });
+
+  it('does not install an Enterprise Guard Hook on a rules-and-CI fallback platform', async () => {
+    if (!codex) throw new Error('Codex platform fixture is missing');
+
+    await expect(installEnterpriseGuard(temporaryRoot, codex, 'project')).resolves.toEqual({
+      status: 'skipped',
+      reason: 'Enterprise Guard uses rules injection + CI fallback on Codex',
+    });
+    await expect(inspectEnterpriseGuard(temporaryRoot, codex, 'project')).resolves.toEqual({
+      present: false,
+    });
+    await expect(removeEnterpriseGuard(temporaryRoot, codex, 'project')).resolves.toEqual({
+      removed: 0,
+      failed: 0,
+    });
+    await expect(fs.access(path.join(temporaryRoot, '.codex', 'hooks.json'))).rejects.toThrow();
   });
 });

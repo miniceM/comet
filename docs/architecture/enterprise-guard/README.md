@@ -2,7 +2,7 @@
 
 > 版本：v1.0 · 最后更新：2026-08-28 · 负责人：Comet maintainers · 评审：Proposed（Issue #2）
 
-本目录是 Enterprise Guard 的可引用设计基线，对应 [Issue #2](https://github.com/miniceM/comet/issues/2)，并作为 [Issue #1](https://github.com/miniceM/comet/issues/1) 与后续实现 Issue 的前置依赖。
+本目录是 Enterprise Guard 的可引用设计基线，对应 [Issue #2](https://github.com/miniceM/comet/issues/2)，并作为 [Issue #1](https://github.com/miniceM/comet/issues/1) 与后续实现 Issue 的前置依赖。当前覆盖结论见 [平台覆盖能力报告](platform-coverage.md)，对应 [Issue #5](https://github.com/miniceM/comet/issues/5)。
 
 ## 目标与边界
 
@@ -18,7 +18,8 @@
 4. [策略与规则目录](policy.md)：定义规则边界、失败分级和例外判定。
 5. [威胁模型](threat-model.md)：明确三层覆盖能防什么、不能防什么。
 6. [平台能力矩阵](platform-capability-matrix.md)：决定某个实现能否把平台 Hook 用作阻断点，还是必须只依赖 CI。
-7. [findings 消费协议](review-consumption.md)：L4 `/sdd-review` 的 reader 消费规则与 L7 基线完整性检查。
+7. [覆盖能力报告](platform-coverage.md)：汇总当前每个平台的安装范围、拦截工具、阻断保证与降级路径。
+8. [findings 消费协议](review-consumption.md)：L4 `/sdd-review` 的 reader 消费规则与 L7 基线完整性检查。
 
 ## 兼容性规则
 

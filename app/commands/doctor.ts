@@ -31,6 +31,7 @@ import {
   inspectEnterpriseGuard,
   installEnterpriseGuard,
 } from '../../domains/enterprise-guard/hook-lifecycle.js';
+import { enterpriseGuardCoverage } from '../../domains/enterprise-guard/platform-coverage.js';
 import {
   getPlatformRuleDestinations,
   getLegacyPlatformRuleDestinations,
@@ -794,8 +795,9 @@ async function checkHookComponents(
     scope,
     workflowSelection,
   );
-  const enterpriseInspection = await inspectEnterpriseGuard(baseDir, platform, scope);
-  if (platform.id === 'claude') {
+  const enterpriseCoverage = enterpriseGuardCoverage(platform);
+  if (enterpriseCoverage.level === 'enforced-project') {
+    const enterpriseInspection = await inspectEnterpriseGuard(baseDir, platform, scope);
     results.push({
       check: `enterprise guard: ${platform.name} (${scope})`,
       status:
@@ -810,6 +812,12 @@ async function checkHookComponents(
         !enterpriseInspection.duplicatePresent
           ? 'exactly one managed Enterprise Guard Hook present'
           : `${enterpriseInspection.error ?? 'managed Enterprise Guard Hook missing'} — run: comet doctor --repair --scope ${scope}`,
+    });
+  } else {
+    results.push({
+      check: `enterprise guard: ${platform.name} (${scope})`,
+      status: 'pass',
+      message: 'rules injection + CI fallback — no Enterprise Guard Hook is installed',
     });
   }
   if (scope === 'global') {
