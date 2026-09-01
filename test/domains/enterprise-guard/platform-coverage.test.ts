@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { enterpriseGuardPlatformProfile } from '../../../domains/enterprise-guard/platform-profiles.js';
 import {
   enterpriseGuardCoverage,
   isEnterpriseGuardEnforcedPlatform,
@@ -35,5 +36,25 @@ describe('Enterprise Guard platform coverage', () => {
       });
       expect(isEnterpriseGuardEnforcedPlatform(platform)).toBe(false);
     }
+  });
+
+  it('separates host capability from verified enforcement', () => {
+    expect(enterpriseGuardPlatformProfile({ id: 'claude' })).toEqual({
+      platformId: 'claude',
+      host: 'command-hook',
+      inputCodec: 'claude',
+      decisionCodec: 'comet-command-hook',
+      installStrategy: 'composite-gateway',
+      enforcement: 'project',
+      coveredTools: ['Write', 'Edit', 'Bash'],
+      orderingGuarantee: 'final',
+    });
+    expect(enterpriseGuardPlatformProfile({ id: 'opencode' })).toMatchObject({
+      host: 'plugin-hook',
+      installStrategy: 'not-installed',
+      enforcement: 'none',
+      orderingGuarantee: 'unknown',
+    });
+    expect(enterpriseGuardCoverage({ id: 'opencode' }).level).toBe('rules-and-ci');
   });
 });
