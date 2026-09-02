@@ -22,12 +22,14 @@ type ClaudeSettings = {
 describe('enterprise guard managed Hook lifecycle', () => {
   let temporaryRoot: string;
   const claude = PLATFORMS.find((platform) => platform.id === 'claude');
-  const codex = PLATFORMS.find((platform) => platform.id === 'codex');
+  const qwen = PLATFORMS.find((platform) => platform.id === 'qwen');
+  const opencode = PLATFORMS.find((platform) => platform.id === 'opencode');
 
   beforeEach(async () => {
     temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'comet-enterprise-guard-'));
     expect(claude).toBeDefined();
-    expect(codex).toBeDefined();
+    expect(qwen).toBeDefined();
+    expect(opencode).toBeDefined();
   });
 
   afterEach(async () => {
@@ -136,6 +138,27 @@ describe('enterprise guard managed Hook lifecycle', () => {
     });
   });
 
+  it('installs the composite Gateway for other verified platforms like Qwen', async () => {
+    if (!qwen) throw new Error('Qwen platform fixture is missing');
+    const qwenScriptPath = path.join(
+      temporaryRoot,
+      '.qwen',
+      'skills',
+      'comet',
+      'scripts',
+      'comet-enterprise-gateway.mjs',
+    );
+    await fs.mkdir(path.dirname(qwenScriptPath), { recursive: true });
+    await fs.writeFile(qwenScriptPath, '#!/usr/bin/env node\n', 'utf8');
+
+    await expect(installEnterpriseGuard(temporaryRoot, qwen, 'project')).resolves.toMatchObject({
+      status: 'installed',
+    });
+    await expect(inspectEnterpriseGuard(temporaryRoot, qwen, 'project')).resolves.toEqual({
+      present: true,
+    });
+  });
+
   it('keeps the legacy Hooks when the Gateway install fails', async () => {
     if (!claude) throw new Error('Claude platform fixture is missing');
     await writeClaudeSettings(legacySettings());
@@ -229,19 +252,19 @@ describe('enterprise guard managed Hook lifecycle', () => {
   });
 
   it('does not install an Enterprise Guard Hook on a rules-and-CI fallback platform', async () => {
-    if (!codex) throw new Error('Codex platform fixture is missing');
+    if (!opencode) throw new Error('OpenCode platform fixture is missing');
 
-    await expect(installEnterpriseGuard(temporaryRoot, codex, 'project')).resolves.toEqual({
+    await expect(installEnterpriseGuard(temporaryRoot, opencode, 'project')).resolves.toEqual({
       status: 'skipped',
-      reason: 'Enterprise Guard uses rules injection + CI fallback on Codex',
+      reason: 'Enterprise Guard uses rules injection + CI fallback on OpenCode',
     });
-    await expect(inspectEnterpriseGuard(temporaryRoot, codex, 'project')).resolves.toEqual({
+    await expect(inspectEnterpriseGuard(temporaryRoot, opencode, 'project')).resolves.toEqual({
       present: false,
     });
-    await expect(removeEnterpriseGuard(temporaryRoot, codex, 'project')).resolves.toEqual({
+    await expect(removeEnterpriseGuard(temporaryRoot, opencode, 'project')).resolves.toEqual({
       removed: 0,
       failed: 0,
     });
-    await expect(fs.access(path.join(temporaryRoot, '.codex', 'hooks.json'))).rejects.toThrow();
+    await expect(fs.access(path.join(temporaryRoot, '.opencode', 'hooks.json'))).rejects.toThrow();
   });
 });

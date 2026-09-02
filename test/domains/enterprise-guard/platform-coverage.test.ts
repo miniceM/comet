@@ -9,25 +9,39 @@ import {
 import { PLATFORMS } from '../../../platform/install/platforms.js';
 
 describe('Enterprise Guard platform coverage', () => {
-  it('installs the Claude Gateway without overstating peer-Hook ordering guarantees', () => {
-    const claude = PLATFORMS.find((platform) => platform.id === 'claude');
-    expect(claude).toBeDefined();
+  const GATEWAY_PLATFORM_IDS = new Set([
+    'claude',
+    'codex',
+    'amazon-q',
+    'qwen',
+    'gemini',
+    'github-copilot',
+    'trae',
+    'trae-cn',
+    'oh-my-pi',
+    'dsh',
+  ]);
 
-    expect(enterpriseGuardCoverage(claude!)).toMatchObject({
-      level: 'best-effort',
-      installationScope: 'project or user-local',
-      enforcedTools: ['Write', 'Edit', 'Bash'],
-      fallback: 'local Gateway + rules injection + CI fallback; peer Hook ordering is not final',
-    });
-    expect(isEnterpriseGuardEnforcedPlatform(claude!)).toBe(false);
-    expect(usesEnterpriseGuardGateway(claude!)).toBe(true);
+  it('installs the composite Gateway for verified command-hook platforms without overstating peer-Hook guarantees', () => {
+    const gatewayPlatforms = PLATFORMS.filter((platform) => GATEWAY_PLATFORM_IDS.has(platform.id));
+    expect(gatewayPlatforms.length).toBe(GATEWAY_PLATFORM_IDS.size);
+
+    for (const platform of gatewayPlatforms) {
+      const coverage = enterpriseGuardCoverage(platform);
+      expect(coverage.level).toBe('best-effort');
+      expect(coverage.installationScope).toBe('project or user-local');
+      expect(coverage.enforcedTools.length).toBeGreaterThan(0);
+      expect(coverage.fallback).toContain('local Gateway + rules injection + CI fallback');
+      expect(isEnterpriseGuardEnforcedPlatform(platform)).toBe(false);
+      expect(usesEnterpriseGuardGateway(platform)).toBe(true);
+    }
   });
 
-  it('labels every other Hook platform as rules injection and CI fallback', () => {
+  it('labels uninstrumented or unverified platforms as rules injection and CI fallback', () => {
     const fallbackPlatforms = PLATFORMS.filter(
-      (platform) => platform.supportsHooks && platform.id !== 'claude',
+      (platform) => !GATEWAY_PLATFORM_IDS.has(platform.id),
     );
-    expect(fallbackPlatforms).not.toHaveLength(0);
+    expect(fallbackPlatforms.length).toBeGreaterThan(0);
 
     for (const platform of fallbackPlatforms) {
       expect(enterpriseGuardCoverage(platform)).toMatchObject({
@@ -41,7 +55,7 @@ describe('Enterprise Guard platform coverage', () => {
     }
   });
 
-  it('separates host capability from verified enforcement', () => {
+  it('separates host capability from verified enforcement across platform profiles', () => {
     expect(enterpriseGuardPlatformProfile({ id: 'claude' })).toEqual({
       platformId: 'claude',
       host: 'command-hook',
@@ -52,6 +66,40 @@ describe('Enterprise Guard platform coverage', () => {
       coveredTools: ['Write', 'Edit', 'Bash'],
       orderingGuarantee: 'unknown',
     });
+
+    expect(enterpriseGuardPlatformProfile({ id: 'qwen' })).toEqual({
+      platformId: 'qwen',
+      host: 'command-hook',
+      inputCodec: 'qwen',
+      decisionCodec: 'comet-command-hook',
+      installStrategy: 'composite-gateway',
+      enforcement: 'best-effort',
+      coveredTools: ['write_file', 'edit_file', 'execute_command', 'Write', 'Edit', 'Bash'],
+      orderingGuarantee: 'unknown',
+    });
+
+    expect(enterpriseGuardPlatformProfile({ id: 'gemini' })).toEqual({
+      platformId: 'gemini',
+      host: 'command-hook',
+      inputCodec: 'gemini',
+      decisionCodec: 'comet-command-hook',
+      installStrategy: 'composite-gateway',
+      enforcement: 'best-effort',
+      coveredTools: ['WriteFile', 'EditFile', 'Shell'],
+      orderingGuarantee: 'unknown',
+    });
+
+    expect(enterpriseGuardPlatformProfile({ id: 'github-copilot' })).toEqual({
+      platformId: 'github-copilot',
+      host: 'command-hook',
+      inputCodec: 'copilot',
+      decisionCodec: 'copilot-json',
+      installStrategy: 'composite-gateway',
+      enforcement: 'best-effort',
+      coveredTools: ['editFiles', 'runCommand', 'applyPatch'],
+      orderingGuarantee: 'unknown',
+    });
+
     expect(enterpriseGuardPlatformProfile({ id: 'opencode' })).toMatchObject({
       host: 'plugin-hook',
       installStrategy: 'not-installed',

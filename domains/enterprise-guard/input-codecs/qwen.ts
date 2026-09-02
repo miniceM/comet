@@ -1,4 +1,4 @@
-import { MAX_ENTERPRISE_HOOK_INPUT_BYTES, isWriteTool } from '../normalized-event.js';
+import { MAX_ENTERPRISE_HOOK_INPUT_BYTES } from '../normalized-event.js';
 import type { EnterpriseGuardInputCodec, EnterpriseHookInput } from '../normalized-event.js';
 import {
   boundedJson,
@@ -11,18 +11,9 @@ import {
   type JsonRecord,
 } from './shared.js';
 
-function writeOperation(
-  toolName: string | null,
-): EnterpriseHookInput['writes'][number]['operation'] {
-  if (toolName === 'Write') return 'create';
-  if (toolName === 'Edit') return 'edit';
-  return detectWriteOperation(toolName);
-}
-
-/** Convert Claude Code raw PreToolUse stdin into the versioned EnterpriseHookInput v1 contract. */
-export function parseClaudeEnterpriseHookInput(
+export function parseQwenEnterpriseHookInput(
   source: string,
-  platformId = 'claude',
+  platformId = 'qwen',
 ): EnterpriseHookInput {
   const raw = rawInput(source);
   const fields = [raw.field];
@@ -44,9 +35,11 @@ export function parseClaudeEnterpriseHookInput(
   }
   const toolInputValue = isRecord(parsed.tool_input) ? parsed.tool_input : {};
   const workingDirectory = boundedString(parsed.cwd ?? parsed.working_directory);
-  const toolName = boundedString(parsed.tool_name ?? parsed.toolName);
+  const toolName = boundedString(parsed.tool_name ?? parsed.toolName ?? parsed.tool);
   const toolInput = boundedJson(toolInputValue);
-  const command = boundedString(toolInputValue.command ?? toolInputValue.cmd);
+  const command = boundedString(
+    toolInputValue.command ?? toolInputValue.cmd ?? toolInputValue.script,
+  );
   fields.push(
     truncationField('workingDirectory', workingDirectory),
     truncationField('tool.name', toolName),
@@ -59,17 +52,25 @@ export function parseClaudeEnterpriseHookInput(
       toolInputValue.path ??
       toolInputValue.filePath ??
       toolInputValue.target_file ??
-      toolInputValue.targetFile,
+      toolInputValue.targetFile ??
+      toolInputValue.fileName,
   );
   const fragmentValue = boundedString(
     toolInputValue.content ??
       toolInputValue.new_string ??
       toolInputValue.patch ??
-      toolInputValue.replacement_content,
+      toolInputValue.replacement_content ??
+      toolInputValue.file_text,
   );
   const writes =
-    toolName.value && (isWriteTool(toolName.value) || isNormalizedWriteTool(toolName.value))
-      ? [{ operation: writeOperation(toolName.value), path: pathValue, fragment: fragmentValue }]
+    toolName.value && isNormalizedWriteTool(toolName.value)
+      ? [
+          {
+            operation: detectWriteOperation(toolName.value),
+            path: pathValue,
+            fragment: fragmentValue,
+          },
+        ]
       : [];
   for (const [index, write] of writes.entries()) {
     fields.push(
@@ -99,7 +100,7 @@ export function parseClaudeEnterpriseHookInput(
   };
 }
 
-export const claudeEnterpriseGuardCodec: EnterpriseGuardInputCodec = {
-  id: 'claude',
-  parse: (source: string) => parseClaudeEnterpriseHookInput(source, 'claude'),
+export const qwenEnterpriseGuardCodec: EnterpriseGuardInputCodec = {
+  id: 'qwen',
+  parse: (source: string) => parseQwenEnterpriseHookInput(source, 'qwen'),
 };
