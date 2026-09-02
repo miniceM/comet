@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,6 +32,14 @@ import {
 } from '../../../domains/comet-native/native-portable-runtime.js';
 import { createNativeRunnerChannel } from '../../../domains/comet-native/native-runner-protocol.js';
 import type { NativeProjectPaths } from '../../../domains/comet-native/native-types.js';
+
+function passedReview(reviewerExecutionRef: string) {
+  return {
+    status: 'passed' as const,
+    summary: 'Independent read-only review passed.',
+    reviewerExecutionRef,
+  };
+}
 
 describe('Native portable Runtime vertical path', () => {
   let root: string;
@@ -146,6 +155,24 @@ describe('Native portable Runtime vertical path', () => {
   });
 
   it('keeps v2 child plans readable while retaining the complete Runtime acceptance matrix', async () => {
+    execFileSync('git', ['-C', root, 'init', '-b', 'master'], { stdio: 'ignore' });
+    await fs.writeFile(path.join(root, 'baseline.txt'), 'baseline\n');
+    execFileSync('git', ['-C', root, 'add', 'baseline.txt'], { stdio: 'ignore' });
+    execFileSync(
+      'git',
+      [
+        '-C',
+        root,
+        '-c',
+        'user.name=Comet Test',
+        '-c',
+        'user.email=comet-test@example.com',
+        'commit',
+        '-m',
+        'baseline',
+      ],
+      { stdio: 'ignore' },
+    );
     await createNativePortableChange({ paths, name: 'readable-child-plan', language: 'en' });
     const changeDir = nativePortableChangeDir(paths, 'readable-child-plan');
     await fs.writeFile(
@@ -190,6 +217,48 @@ children:
     expect(state.children_contract_hash).toEqual(expect.any(String));
   });
 
+  it('rejects multi-child Supervisor Shape confirmation without a coordination mode', async () => {
+    await createNativePortableChange({ paths, name: 'coordination-required', language: 'en' });
+    const changeDir = nativePortableChangeDir(paths, 'coordination-required');
+    await fs.writeFile(
+      path.join(changeDir, 'brief.md'),
+      '# Acceptance examples\n- The first behavior is visible.\n- The second behavior is visible.\n',
+    );
+    await fs.writeFile(
+      path.join(changeDir, 'children.yaml'),
+      `schema: comet.native.children.v2
+acceptance_index:
+  A1:
+    source: brief.md
+    text: The first behavior is visible.
+  A2:
+    source: brief.md
+    text: The second behavior is visible.
+children:
+  - name: first-child
+    depends_on: []
+    covers: [A1]
+  - name: second-child
+    depends_on: []
+    covers: [A2]
+`,
+    );
+    const stateFile = nativePortableStateFile(paths, 'coordination-required');
+    const initialState = await fs.readFile(stateFile, 'utf8');
+    await fs.writeFile(
+      stateFile,
+      initialState
+        .replace('change_branch: null', 'change_branch: parent')
+        .replace('target_branch: null', 'target_branch: parent'),
+    );
+
+    await expect(
+      confirmNativePortableShape({ paths, name: 'coordination-required' }),
+    ).rejects.toThrow(
+      'Native Supervisor Shape requires --coordination-mode multi-session or single-session',
+    );
+  });
+
   it('reruns a repeatable interrupted check instead of reusing its incomplete result', async () => {
     await createNativePortableChange({ paths, name: 'timeout-rerun', language: 'en' });
     const changeDir = nativePortableChangeDir(paths, 'timeout-rerun');
@@ -210,6 +279,7 @@ children:
         candidateId: 'timeout-candidate',
         summary: 'Implemented.',
         addressedAcceptanceIds: ['A1'],
+        review: passedReview('timeout-reviewer'),
       },
     });
     const plan = {
@@ -259,6 +329,7 @@ Ship the behavior.
         candidateId: 'candidate-1',
         summary: 'Implemented the behavior.',
         addressedAcceptanceIds: ['A1'],
+        review: passedReview('reviewer-1'),
       },
     });
     const executed = await executeNativePortableCheckPlan({
@@ -351,6 +422,7 @@ Ship the behavior.
         candidateId: 'drift-candidate',
         summary: 'Implemented.',
         addressedAcceptanceIds: ['A1'],
+        review: passedReview('drift-reviewer'),
       },
     });
     const executed = await executeNativePortableCheckPlan({ paths, name: state.name, plans: [] });
@@ -428,6 +500,7 @@ Ship the behavior.
         candidateId: 'candidate-request-checks',
         summary: 'Implemented the requested behavior.',
         addressedAcceptanceIds: ['A1'],
+        review: passedReview('request-checks-reviewer'),
       },
     });
     const baselinePlan = {
@@ -593,6 +666,7 @@ Ship the behavior.
         candidateId: 'lock-candidate',
         summary: 'Implemented.',
         addressedAcceptanceIds: ['A1'],
+        review: passedReview('lock-reviewer'),
       },
     });
     const baseline = await executeNativePortableCheckPlan({ paths, name: state.name, plans: [] });
@@ -681,6 +755,7 @@ Ship the behavior.
         candidateId: 'candidate-invalid-requests',
         summary: 'Implemented the behavior.',
         addressedAcceptanceIds: ['A1'],
+        review: passedReview('invalid-requests-reviewer'),
       },
     });
     const baselinePlan = {
@@ -870,6 +945,7 @@ Ship the behavior.
         candidateId: 'late-candidate',
         summary: 'Implemented.',
         addressedAcceptanceIds: ['A1'],
+        review: passedReview('late-reviewer'),
       },
     });
     const executed = await executeNativePortableCheckPlan({ paths, name: state.name, plans: [] });
@@ -955,6 +1031,7 @@ Ship the behavior.
         candidateId: 'candidate-repeat-request',
         summary: 'Implemented the behavior.',
         addressedAcceptanceIds: ['A1'],
+        review: passedReview('repeat-request-reviewer'),
       },
     });
     const plan = {
@@ -1046,6 +1123,7 @@ Ship the behavior.
         candidateId: 'candidate-runtime-owned',
         summary: 'Implemented the behavior.',
         addressedAcceptanceIds: ['A1'],
+        review: passedReview('runtime-owned-reviewer'),
       },
     });
     const executed = await executeNativePortableCheckPlan({

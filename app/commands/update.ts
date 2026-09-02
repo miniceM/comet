@@ -1709,10 +1709,13 @@ async function updateSingleProject(
       totalRulesFailed += ruleResult.failed;
       const ruleStatus =
         ruleResult.failed > 0 ? 'failed' : ruleResult.copied > 0 ? 'copied' : 'skipped';
+      const supportsRules =
+        target.platform.rulesFormat === 'dsh' ||
+        Boolean(target.platform.rulesDir && target.platform.rulesFormat);
       const ruleReason =
         ruleResult.failed > 0
           ? `${ruleResult.failed} Rule file(s) failed to install`
-          : !target.platform.rulesDir || !target.platform.rulesFormat
+          : !supportsRules
             ? 'platform does not support rules'
             : undefined;
       ruleTargetResults.push({
@@ -1773,6 +1776,9 @@ async function updateSingleProject(
       if (status === 'installed') {
         totalHooksInstalled++;
         log(`  Comet hooks -> ${target.platform.name}: ${t(lang, 'hooksUpdated')}`);
+        if (reason) {
+          log(`  Comet hooks -> ${target.platform.name}: ${reason}`);
+        }
         if (cleanupFailed > 0) {
           log(`  Comet hooks -> ${target.platform.name}: ${reason}`);
         }
@@ -1848,19 +1854,13 @@ async function updateSingleProject(
       if (scope === 'project') {
         await assertClassicProjectMutationAllowed?.();
       }
-      const status = await installOpenSpec(
-        projectPath,
-        toolIds,
-        scope,
-        !skipPackageSelfUpdate,
+      const status = await installOpenSpec(projectPath, toolIds, scope, {
+        shouldInstallCli: !skipPackageSelfUpdate,
         mirrorPlatformIds,
         artifactLayout,
-        scope === 'project' ? assertClassicProjectMutationAllowed : undefined,
-        undefined,
-        [],
-        [],
+        projectMutationGuard: scope === 'project' ? assertClassicProjectMutationAllowed : undefined,
         selectedPlatformIds,
-      );
+      });
       if (status === 'failed') {
         openSpecStatus = 'failed';
         openSpecReason = `OpenSpec ${scope} asset update failed`;

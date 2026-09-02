@@ -11,7 +11,7 @@ import {
   SafetyCertificateOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { Button, Spin, Tooltip } from 'antd';
+import { Button, Skeleton, Tooltip } from 'antd';
 import { useAnimatedNumber } from './use-animated-number.js';
 import { DashboardWorkspaceRegion } from './workspace-layout.jsx';
 
@@ -41,16 +41,48 @@ const LOCAL_STAGE_LABELS = {
 };
 const VERIFICATION_LABELS = {
   pending: '待验证',
-  pass: '验证通过',
+  pass: '验收通过',
   fail: '验证失败',
   blocked: '验证阻塞',
 };
 const ASSURANCE_PRESENTATION = {
-  'host-attested': { label: '宿主身份校验', tone: 'ok' },
-  'skill-coordinated': { label: 'Skill 协调', tone: 'warn' },
-  'semantic-verification-unavailable': { label: '语义验收不可用', tone: 'danger' },
-  'user-confirmed-degraded': { label: '用户确认降级通过', tone: 'warn' },
+  'host-attested': {
+    label: '已完成独立验证',
+    description: '可信运行环境已经完成独立验证。',
+    tone: 'ok',
+  },
+  'skill-coordinated': {
+    label: '已完成检查，但需要你确认验证结果',
+    description: '检查已完成，但系统无法确认验证者是否独立，需要你确认。',
+    tone: 'warn',
+  },
+  'semantic-verification-unavailable': {
+    label: '无法完成完整验证，只完成了自动检查',
+    description: '没有可用的语义验证，当前只有 Runtime 自动检查结果。',
+    tone: 'danger',
+  },
+  'user-confirmed-degraded': {
+    label: '你已确认接受不完整验证结果',
+    description: '你已明确接受只有自动检查、缺少语义验证的结果。',
+    tone: 'warn',
+  },
 };
+function assurancePresentation(change) {
+  const assurance = change.verification?.assurance;
+  const presentation = ASSURANCE_PRESENTATION[assurance] ?? null;
+  if (
+    assurance === 'skill-coordinated' &&
+    (change.status === 'archived' ||
+      (change.phase === 'archive' && change.loop?.nextAction === 'archive'))
+  ) {
+    return {
+      ...presentation,
+      label: '已完成检查，验证结果已确认',
+      description: '检查已完成，你已经确认接受这次验证结果。',
+    };
+  }
+  return presentation;
+}
 const ACCEPTANCE_LABELS = {
   passed: '通过',
   failed: '失败',
@@ -289,7 +321,10 @@ export function NativeWorkflowPanel({
     if (selectedSummary) onSelect?.(selectedSummary);
   }, [onSelect, selectedSummary]);
   const selected = serverPaged ? selectedDetail : selectedSummary;
+  const detailPending = Boolean(selectedSummary && !selected && (detailLoading || !detailError));
   const hasNativeChanges = Boolean(native && native.totalChangeCount > 0);
+  const isEmptyView = !pageLoading && visibleChanges.length === 0;
+  const isLoadingView = pageLoading && visibleChanges.length === 0;
 
   return (
     <div className="mx-auto min-w-0 max-w-dashboard">
@@ -304,81 +339,119 @@ export function NativeWorkflowPanel({
       <NativeWorkflowSuggestion change={selected ?? selectedSummary} />
       <NativeSummaryCards native={native} loadedChanges={visibleChanges} />
       <SectionHead title="Native 变更工作区" hint="查看循环、验收、阻塞与恢复状态" />
-      {!native || !hasNativeChanges ? (
-        <EmptyState />
-      ) : (
-        <DashboardWorkspaceRegion
-          stableFrame
-          leftClassName="native-workspace-left"
-          left={
-            <NativeChangesExplorer
-              changes={visibleChanges}
-              total={serverPaged ? (total ?? sourceChanges.length) : sourceChanges.length}
-              selectedKey={selectedSummary ? changeKey(selectedSummary) : null}
-              query={query}
+      <DashboardWorkspaceRegion
+        stableFrame
+        leftClassName="native-workspace-left"
+        left={
+          <NativeChangesExplorer
+            changes={visibleChanges}
+            total={serverPaged ? (total ?? sourceChanges.length) : sourceChanges.length}
+            selectedKey={selectedSummary ? changeKey(selectedSummary) : null}
+            query={query}
+            tab={tab}
+            onTab={onTab}
+            onSelect={(change) => setSelectedKey(changeKey(change))}
+            listRef={listRef}
+            loadMoreRef={loadMoreRef}
+            hasMore={hasMoreChanges}
+            pageLoading={pageLoading}
+            onScroll={handleListScroll}
+          />
+        }
+        center={
+          isEmptyView ? (
+            <NativeEmptyChangeDetail
+              native={native}
               tab={tab}
+              query={query}
               onTab={onTab}
-              onSelect={(change) => setSelectedKey(changeKey(change))}
-              listRef={listRef}
-              loadMoreRef={loadMoreRef}
-              hasMore={hasMoreChanges}
-              pageLoading={pageLoading}
-              onScroll={handleListScroll}
+              emptyProject={!hasNativeChanges}
             />
-          }
-          center={
-            selected ? (
-              <NativeChangeDetail
-                change={selected}
-                onPreview={onPreview}
-                onCopyChangeName={onCopyChangeName}
-              />
-            ) : selectedSummary && (detailLoading || !detailError) ? (
-              <div className="native-change-detail dashboard-change-detail-loading min-w-0 rounded-lg border border-border bg-bg p-10 text-center text-sm text-muted shadow-raised">
-                正在加载 Native 变更详情…
-              </div>
-            ) : detailError ? (
-              <div className="native-change-detail dashboard-change-detail-loading min-w-0 rounded-lg border border-border bg-bg p-10 text-center text-sm text-danger shadow-raised">
-                <p role="alert">Native 变更详情加载失败：{detailError.reason}</p>
-                <Button className="mt-4" onClick={onRetryDetail}>
-                  重新加载
-                </Button>
-              </div>
-            ) : (
-              <NativeWorkspaceEmptyState native={native} tab={tab} query={query} onTab={onTab} />
-            )
-          }
-          right={selected ? <NativeSidePanel change={selected} git={git} /> : null}
-        />
-      )}
+          ) : isLoadingView || detailPending ? (
+            <NativeChangeDetailSkeleton />
+          ) : selected ? (
+            <NativeChangeDetail
+              change={selected}
+              onPreview={onPreview}
+              onCopyChangeName={onCopyChangeName}
+            />
+          ) : detailError ? (
+            <div className="native-change-detail dashboard-change-detail-loading min-w-0 rounded-lg border border-border bg-bg p-10 text-center text-sm text-danger shadow-raised">
+              <p role="alert">Native 变更详情加载失败：{detailError.reason}</p>
+              <Button className="mt-4" onClick={onRetryDetail}>
+                重新加载
+              </Button>
+            </div>
+          ) : (
+            <NativeEmptyChangeDetail native={native} tab={tab} query={query} onTab={onTab} />
+          )
+        }
+        right={
+          isEmptyView ? (
+            <NativeEmptySidePanel />
+          ) : isLoadingView || detailPending ? (
+            <NativeSidePanelSkeleton />
+          ) : selected ? (
+            <NativeSidePanel change={selected} git={git} />
+          ) : null
+        }
+      />
     </div>
   );
 }
 
-function NativeWorkspaceEmptyState({ native, tab, query, onTab }) {
+function NativeEmptyChangeDetail({ native, tab, query = '', onTab, emptyProject = false }) {
   const hasArchivedChanges = (native?.archivedChangeCount ?? 0) > 0;
+  const hasActiveChanges = (native?.activeChangeCount ?? 0) > 0;
   const showArchiveShortcut = tab === 'active' && !query.trim() && hasArchivedChanges;
+  const showActiveShortcut = tab === 'archived' && !query.trim() && hasActiveChanges;
+  const title = emptyProject
+    ? '还没有 Native change'
+    : showArchiveShortcut
+      ? '当前没有活跃的 Native change'
+      : showActiveShortcut
+        ? '还没有已归档的 Native change'
+        : '没有匹配的 Native change';
+  const description = emptyProject
+    ? '启动 Native 工作流后，变更进度、验收结果和恢复状态会集中显示在这里。'
+    : showArchiveShortcut
+      ? '当前工作区没有进行中的变更，你可以继续查看已归档的历史记录。'
+      : showActiveShortcut
+        ? '当前还没有归档记录，你可以返回查看正在进行的变更。'
+        : '调整顶部搜索条件，或切换变更范围后再试。';
   return (
-    <section className="native-workspace-empty flex min-h-[360px] items-center justify-center rounded-lg bg-bg p-8 text-center shadow-raised xl:col-span-1 2xl:col-span-2">
-      <div className="max-w-sm">
-        <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-accent-softer text-xl text-accent">
-          ◇
+    <section className="native-change-detail native-change-detail-empty min-w-0 rounded-lg border border-border bg-bg shadow-raised">
+      <div className="dashboard-workspace-empty-detail text-center">
+        <span className="native-workspace-empty-icon" aria-hidden="true">
+          <FlagOutlined />
         </span>
-        <h3 className="mt-5 text-lg font-semibold tracking-tight">
-          {showArchiveShortcut ? '当前没有活跃的 Native change' : '没有匹配的 Native change'}
-        </h3>
-        <p className="mt-2 text-sm leading-relaxed text-muted">
-          {showArchiveShortcut
-            ? '当前 Native 工作均已归档，可查看只读历史。'
-            : '调整搜索条件或切换筛选后重试。'}
-        </p>
-        {showArchiveShortcut && (
-          <Button className="mt-5" type="primary" onClick={() => onTab('archived')}>
+        <h3 className="mt-5 text-lg font-semibold tracking-tight">{title}</h3>
+        <p className="mt-2 max-w-md text-sm leading-relaxed text-muted">{description}</p>
+        {showArchiveShortcut ? (
+          <Button className="mt-5" type="primary" onClick={() => onTab?.('archived')}>
             查看已归档变更
           </Button>
-        )}
+        ) : showActiveShortcut ? (
+          <Button className="mt-5" type="primary" onClick={() => onTab?.('active')}>
+            查看活跃变更
+          </Button>
+        ) : null}
       </div>
     </section>
+  );
+}
+
+function NativeEmptySidePanel() {
+  return (
+    <aside className="dashboard-workspace-side-empty" aria-label="Native 变更状态">
+      <div>
+        <span className="native-workspace-empty-icon" aria-hidden="true">
+          <FlagOutlined />
+        </span>
+        <h3>暂无变更数据</h3>
+        <p>选择或创建 Native change 后，这里会显示恢复状态、阻塞信息和 Git 摘要。</p>
+      </div>
+    </aside>
   );
 }
 
@@ -594,9 +667,7 @@ function NativeChangesExplorer({
         >
           {changes.length === 0 ? (
             pageLoading ? (
-              <div className="flex justify-center py-8">
-                <Spin aria-label="正在加载 Native 变更列表" />
-              </div>
+              <NativeChangeListSkeleton />
             ) : (
               <div className="py-8 text-center text-sm text-muted">
                 {tab === 'active'
@@ -713,18 +784,37 @@ function NativeChangesExplorer({
               );
             })
           )}
-          {hasMore && (
+          {hasMore && changes.length > 0 && (
             <div
               ref={loadMoreRef}
               className="py-2 text-center text-xs text-meta"
               aria-live="polite"
             >
-              继续下滑加载更多
+              {pageLoading ? <NativeChangeListSkeleton compact /> : '继续下滑加载更多'}
             </div>
           )}
         </div>
       </div>
     </aside>
+  );
+}
+
+function NativeChangeListSkeleton({ compact = false }) {
+  return (
+    <div
+      className={`native-change-list-skeleton ${compact ? 'is-compact' : ''}`}
+      aria-label={compact ? '正在加载更多 Native 变更' : '正在加载 Native 变更列表'}
+      aria-busy="true"
+    >
+      <Skeleton
+        active
+        title={{ width: compact ? '36%' : '48%' }}
+        paragraph={{
+          rows: compact ? 1 : 6,
+          width: compact ? '72%' : ['76%', '58%', '88%', '66%', '82%', '54%'],
+        }}
+      />
+    </div>
   );
 }
 
@@ -776,6 +866,28 @@ function NativeChangeDetail({ change, onPreview, onCopyChangeName }) {
         <NativeVerificationCard change={change} />
         <NativeBlockersCard blockers={change.blockers ?? []} />
         <NativeHistoryCard history={change.history ?? []} overflow={change.historyOverflow} />
+      </div>
+    </section>
+  );
+}
+
+function NativeChangeDetailSkeleton() {
+  return (
+    <section
+      className="native-change-detail native-change-detail-skeleton min-w-0 rounded-lg border border-border bg-bg shadow-raised"
+      aria-label="正在加载 Native 变更详情"
+      aria-busy="true"
+    >
+      <div className="border-b border-border-soft px-5 py-5">
+        <Skeleton active title={{ width: '38%' }} paragraph={{ rows: 1, width: '58%' }} />
+      </div>
+      <div className="space-y-6 p-5">
+        <Skeleton active title={{ width: '24%' }} paragraph={{ rows: 3 }} />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Skeleton active title={{ width: '42%' }} paragraph={{ rows: 4 }} />
+          <Skeleton active title={{ width: '42%' }} paragraph={{ rows: 4 }} />
+        </div>
+        <Skeleton active title={{ width: '28%' }} paragraph={{ rows: 4 }} />
       </div>
     </section>
   );
@@ -954,13 +1066,19 @@ function AcceptanceMetric({ label, value }) {
 
 function NativeVerificationCard({ change }) {
   const checks = change.checks ?? [];
-  const assurance = ASSURANCE_PRESENTATION[change.verification?.assurance] ?? null;
+  const assurance = assurancePresentation(change);
   return (
     <article className="rounded-xl border border-border-soft bg-bg px-5 py-4">
       <div className="flex items-center justify-between gap-3">
         <h4 className="text-sm font-semibold tracking-tight">检查结果</h4>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {assurance && <Pill tone={assurance.tone}>{assurance.label}</Pill>}
+          {assurance && (
+            <Tooltip title={assurance.description}>
+              <span>
+                <Pill tone={assurance.tone}>{assurance.label}</Pill>
+              </span>
+            </Tooltip>
+          )}
           <Pill tone={verificationTone(change.verificationResult)}>
             {VERIFICATION_LABELS[change.verificationResult] ?? '状态未知'}
           </Pill>
@@ -1241,6 +1359,22 @@ function NativeSidePanel({ change, git }) {
   );
 }
 
+function NativeSidePanelSkeleton() {
+  return (
+    <aside
+      className="native-side-panel-skeleton space-y-5"
+      aria-label="正在加载 Native 变更侧栏"
+      aria-busy="true"
+    >
+      {[3, 2, 3].map((rows, index) => (
+        <section key={index} className="rounded-lg bg-bg p-5 shadow-raised">
+          <Skeleton active title={{ width: '42%' }} paragraph={{ rows }} />
+        </section>
+      ))}
+    </aside>
+  );
+}
+
 function SideFact({ label, value }) {
   return (
     <div className="flex items-start justify-between gap-4 border-b border-border-soft pb-3 last:border-0 last:pb-0">
@@ -1265,15 +1399,6 @@ function Pill({ tone = 'neutral', children }) {
     >
       <span className="break-words">{children}</span>
     </span>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="rounded-lg bg-bg p-12 text-center shadow-raised">
-      <div className="text-lg font-semibold">当前没有 Native change</div>
-      <p className="mt-2 text-sm text-muted">Native 状态出现后会在这里展示。</p>
-    </div>
   );
 }
 

@@ -2,16 +2,26 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { inspectGitWorktree } from '../../platform/paths/git-worktree.js';
+import { inspectGitWorktree, resolveGitRef } from '../../platform/paths/git-worktree.js';
 
 import { atomicWriteText } from './native-atomic-file.js';
 import { readNativeBoundedTextFile } from './native-bounded-file.js';
 import {
+  findNativeV1SupervisorParents,
   hashNativeParentContract,
   inspectNativeChildren,
   nativeChildrenAcceptanceValidation,
   readNativeChildrenContract,
+  readNativeSupervisorShapeIntent,
 } from './native-children.js';
+import {
+  createNativeSupervisorState,
+  prepareNativeSupervisorIntegrationWorkspace,
+  rebuildNativeSupervisorStateFromFacts,
+  readNativeSupervisorState,
+  reconcileNativeSupervisorState,
+  writeNativeSupervisorState,
+} from './native-supervisor.js';
 import {
   listActiveNativeChangesOwnedByWorkspace,
   NativeWorkspaceIsolationRequiredError,
@@ -69,7 +79,6 @@ import type {
   NativePortableWorkspace,
 } from './native-portable-types.js';
 import {
-  createNativeRunnerChannel,
   isNativeTrustedVerifierEnvelope,
   type NativeTrustedVerifierEnvelope,
 } from './native-runner-protocol.js';
@@ -87,7 +96,9 @@ import {
   nativePreferredChangeRuntimeDir,
   resolveContainedNativePath,
 } from './native-paths.js';
+import { nativeBriefTemplate } from './native-artifact-language.js';
 import type { CometProjectConfig, NativeProjectPaths } from './native-types.js';
+import type { NativeSupervisorCoordinationMode } from './native-portable-types.js';
 import type { NativeWorkspaceBinding } from './native-workspace.js';
 import { readProjectConfig, writeProjectConfig } from './native-config.js';
 
@@ -95,22 +106,7 @@ const NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 export const NATIVE_PORTABLE_STATE_FILE = 'comet-state.yaml';
 export const NATIVE_LOCAL_EXECUTION_FILE = 'state.json';
 
-export const NATIVE_PORTABLE_BRIEF_TEMPLATE = `# Outcome
-
-# Scope
-
-# Non-goals
-
-# Acceptance examples
-
-# Constraints and invariants
-
-# Decisions
-
-# Open questions
-
-# Verification expectations
-`;
+export const NATIVE_PORTABLE_BRIEF_TEMPLATE = nativeBriefTemplate('en');
 
 export type NativePortableExpectedContinuationAction =
   | 'confirm-shape'
@@ -252,7 +248,10 @@ export async function createNativePortableChange(options: {
         await fs.mkdir(runtimeDir, { recursive: false });
         createdRuntime = true;
         await fs.mkdir(path.join(changeDir, 'specs'), { recursive: true });
-        await atomicWriteText(path.join(changeDir, 'brief.md'), NATIVE_PORTABLE_BRIEF_TEMPLATE);
+        await atomicWriteText(
+          path.join(changeDir, 'brief.md'),
+          nativeBriefTemplate(options.language),
+        );
         const state = createNativePortableState({
           name: options.name,
           language: options.language,
@@ -393,6 +392,7 @@ async function readNativePortableAcceptance(options: {
 export async function confirmNativePortableShape(options: {
   paths: NativeProjectPaths;
   name: string;
+  coordinationMode?: NativeSupervisorCoordinationMode;
   expectedContinuation?: NativePortableExpectedContinuation;
 }): Promise<NativePortableState> {
   return withNativeMutationLock(
@@ -422,16 +422,38 @@ export async function confirmNativePortableShape(options: {
       if (children && state.workspace.change_branch === null) {
         throw new Error('Native parent changes require a Git integration branch');
       }
+      const coordinationRequired =
+        (await readNativeSupervisorShapeIntent(
+          nativePortableChangeDir(options.paths, state.name),
+        )) ||
+        (children?.contract.schema === 'comet.native.children.v2' &&
+          children.contract.children.length >= 2);
+      const coordinationMode = options.coordinationMode ?? state.coordination_mode;
+      if (coordinationRequired && !children) {
+        throw new Error('Native Supervisor Shape requires children.yaml before confirmation');
+      }
+      if (coordinationRequired && coordinationMode === undefined) {
+        throw new Error(
+          'Native Supervisor Shape requires --coordination-mode multi-session or single-session',
+        );
+      }
+      if (!coordinationRequired && options.coordinationMode !== undefined) {
+        throw new Error(
+          '--coordination-mode is only valid for a multi-child Native Supervisor Shape',
+        );
+      }
       const next = confirmNativePortableAcceptance({
         state: { ...state, spec_changes: specChanges },
         acceptance: acceptance.map((entry) => ({ ...entry })),
       });
       delete next.children_contract_hash;
+      delete next.coordination_mode;
       if (children) {
         next.children_contract_hash = hashNativeParentContract({
           acceptance: next.acceptance,
           children: children.contract,
         });
+        if (coordinationRequired) next.coordination_mode = coordinationMode;
         const latestDecision = [...state.history]
           .reverse()
           .find(({ outcome }) => outcome === 'pass' || outcome === 'fail');
@@ -450,6 +472,43 @@ export async function confirmNativePortableShape(options: {
           }
         }
       }
+      let supervisorWorkspace: Awaited<
+        ReturnType<typeof prepareNativeSupervisorIntegrationWorkspace>
+      > | null = null;
+      let existingSupervisor =
+        children?.contract.schema === 'comet.native.children.v2'
+          ? await readNativeSupervisorState(options.paths, state.name)
+          : null;
+      let supervisorTargetBranch: string | null = null;
+      let supervisorTargetCommit: string | null = null;
+      if (children?.contract.schema === 'comet.native.children.v2') {
+        supervisorTargetBranch = state.workspace.target_branch ?? state.workspace.change_branch;
+        if (!supervisorTargetBranch) {
+          throw new Error('Native Supervisor v2 requires a target branch');
+        }
+        supervisorTargetCommit = resolveGitRef(options.paths.projectRoot, supervisorTargetBranch);
+        if (!supervisorTargetCommit) {
+          throw new Error(
+            `Native Supervisor target branch has no commit: ${supervisorTargetBranch}`,
+          );
+        }
+        if (!existingSupervisor) {
+          existingSupervisor = await rebuildNativeSupervisorStateFromFacts({
+            paths: options.paths,
+            parent: state.name,
+            targetBranch: supervisorTargetBranch,
+            contract: children.contract,
+          });
+        }
+        if (!existingSupervisor) {
+          supervisorWorkspace = await prepareNativeSupervisorIntegrationWorkspace({
+            projectRoot: options.paths.projectRoot,
+            parent: state.name,
+            targetBranch: supervisorTargetBranch,
+            sourceConfig: await readProjectConfig(options.paths.projectRoot),
+          });
+        }
+      }
       const written = await writePortableMutation({ paths: options.paths, previous: state, next });
       await writeNativeLocalExecution(
         nativeLocalExecutionFile(options.paths, state.name),
@@ -460,6 +519,29 @@ export async function confirmNativePortableShape(options: {
         }),
         { containedRoot: options.paths.runtimeDir },
       );
+      if (
+        children?.contract.schema === 'comet.native.children.v2' &&
+        supervisorTargetBranch &&
+        supervisorTargetCommit
+      ) {
+        const supervisorState = existingSupervisor
+          ? reconcileNativeSupervisorState({
+              state: existingSupervisor,
+              contract: children.contract,
+            })
+          : supervisorWorkspace
+            ? createNativeSupervisorState({
+                parent: written.name,
+                targetBranch: supervisorTargetBranch,
+                targetCommit: supervisorTargetCommit,
+                integrationBranch: supervisorWorkspace.binding.changeBranch!,
+                integrationWorktree: supervisorWorkspace.projectRoot,
+                contract: children.contract,
+              })
+            : null;
+        if (!supervisorState) throw new Error('Native Supervisor integration state is unavailable');
+        await writeNativeSupervisorState(options.paths, supervisorState);
+      }
       return written;
     },
   );
@@ -549,7 +631,13 @@ export async function submitNativePortableBuilderCandidate(options: {
         validation: nativeChildrenAcceptanceValidation(state),
       });
       if (children || state.children_contract_hash) {
-        throw new Error('Native parent Build advances child changes instead of a parent Builder');
+        const childStatus = await inspectNativeChildren({ paths: options.paths, state });
+        if (!childStatus?.confirmed || !childStatus.allDone) {
+          throw new Error('Native parent Build advances child changes before parent review');
+        }
+        if (state.loop.stage === 'repairing' && state.verification_result === 'fail') {
+          throw new Error('Native parent verification failed; complete the repair child first');
+        }
       }
       const next = submitNativeBuilderCandidate({ state, input: options.input });
       const written = await writePortableMutation({ paths: options.paths, previous: state, next });
@@ -567,61 +655,99 @@ export async function submitNativePortableBuilderCandidate(options: {
   );
 }
 
-export async function completeNativePortableParentBuild(options: {
+export interface NativeSupervisorParentAdvance {
+  trigger: 'v2-integrate' | 'v1-archive' | 'recovery';
+  parent: string | null;
+  advanced: boolean;
+  message: string | null;
+  blocker: string | null;
+}
+
+/**
+ * Recompute whether every Child is integrated and the parent is ready for an
+ * independent reviewed handoff. This inspection does not advance the phase.
+ */
+export async function inspectNativeSupervisorParentReviewReadiness(options: {
   paths: NativeProjectPaths;
   name: string;
-  summary: string;
-}): Promise<NativePortableState> {
-  return withNativeMutationLock(
-    options.paths,
-    `complete portable parent Build ${options.name}`,
-    async () => {
-      const state = await readNativePortableChange(options.paths, options.name);
-      if (state.phase !== 'build' || state.status !== 'active') {
-        throw new Error('Native parent integration can only complete from active Build');
-      }
-      await ensureNativePortableAcceptanceCurrentLocked({ paths: options.paths, state });
-      const children = await inspectNativeChildren({ paths: options.paths, state });
-      if (!children || !state.children_contract_hash) {
-        throw new Error(`Native change ${state.name} has no confirmed child contract`);
-      }
-      if (!children.confirmed) {
-        throw new Error('Native parent child declarations require Shape confirmation');
-      }
-      if (!children.allDone) {
-        throw new Error('Native parent cannot enter Verify before every child is merged');
-      }
-      if (state.loop.stage === 'repairing' && state.verification_result === 'fail') {
-        throw new Error('Native parent verification failed; add and confirm a repair child');
-      }
-      const runner = createNativeRunnerChannel();
-      const identity = runner.captureExecutionIdentity({
-        identityProvider: 'skill-coordinated',
-        executionRef: `native-parent-integration:${randomUUID()}`,
-      });
-      const next = submitNativeBuilderCandidate({
-        state,
-        input: {
-          identity,
-          summary: options.summary,
-          addressedAcceptanceIds: state.acceptance.map(({ id }) => id),
-          checks: [],
-          knownLimits: [],
-        },
-      });
-      const written = await writePortableMutation({ paths: options.paths, previous: state, next });
-      await writeNativeLocalExecution(
-        nativeLocalExecutionFile(options.paths, state.name),
-        rebuildNativeLocalExecution({
-          portableState: written,
-          projectRoot: options.paths.projectRoot,
-          branch: currentBranch(options.paths.projectRoot),
-        }),
-        { containedRoot: options.paths.runtimeDir },
-      );
-      return written;
+  trigger: NativeSupervisorParentAdvance['trigger'];
+}): Promise<{ state: NativePortableState; parentAdvance: NativeSupervisorParentAdvance }> {
+  const state = await readNativePortableChange(options.paths, options.name);
+  const base = {
+    trigger: options.trigger,
+    parent: options.name,
+    advanced: false,
+    message: null,
+    blocker: null,
+  } satisfies NativeSupervisorParentAdvance;
+  if (state.phase !== 'build' || state.status !== 'active') {
+    return { state, parentAdvance: base };
+  }
+  const children = await inspectNativeChildren({ paths: options.paths, state });
+  if (!children || !children.confirmed || !children.allDone) {
+    return {
+      state,
+      parentAdvance: {
+        ...base,
+        blocker:
+          children && !children.confirmed
+            ? 'Supervisor child declarations require Shape confirmation'
+            : null,
+      },
+    };
+  }
+  if (state.loop.stage === 'repairing' && state.verification_result === 'fail') {
+    return {
+      state,
+      parentAdvance: {
+        ...base,
+        blocker: 'Native parent verification failed; add and confirm a repair child',
+      },
+    };
+  }
+  const message =
+    state.language === 'zh-CN'
+      ? '全部 Child 已完成；Supervisor 父级候选需要独立代码审查后再进入验证'
+      : 'All Children are complete; the Supervisor parent candidate needs an independent code review before verification.';
+  return {
+    state,
+    parentAdvance: {
+      ...base,
+      message,
     },
-  );
+  };
+}
+
+export async function tryAutoAdvanceNativeV1SupervisorParent(options: {
+  childState: NativePortableState;
+  childPaths: NativeProjectPaths;
+}): Promise<{
+  parentAdvance: NativeSupervisorParentAdvance;
+  parentState: NativePortableState | null;
+}> {
+  const discovery = await findNativeV1SupervisorParents({
+    paths: options.childPaths,
+    childName: options.childState.name,
+    targetBranch: options.childState.workspace.target_branch,
+  });
+  if (!discovery.candidate) {
+    return {
+      parentState: null,
+      parentAdvance: {
+        trigger: 'v1-archive',
+        parent: null,
+        advanced: false,
+        message: null,
+        blocker: discovery.blockers.length > 0 ? discovery.blockers.join('; ') : null,
+      },
+    };
+  }
+  const result = await inspectNativeSupervisorParentReviewReadiness({
+    paths: discovery.candidate.paths,
+    name: discovery.candidate.state.name,
+    trigger: 'v1-archive',
+  });
+  return { parentState: result.state, parentAdvance: result.parentAdvance };
 }
 
 function localCheck(
@@ -914,6 +1040,7 @@ async function reserveNativePortableCheckPlan(options: {
   paths: NativeProjectPaths;
   name: string;
   plans: NativeCheckPlan[];
+  projectRoot: string;
 }): Promise<
   | {
       kind: 'execute';
@@ -937,15 +1064,15 @@ async function reserveNativePortableCheckPlan(options: {
         await readOrRebuildNativeLocalExecution({
           file,
           portableState: state,
-          projectRoot: options.paths.projectRoot,
-          branch: currentBranch(options.paths.projectRoot),
+          projectRoot: options.projectRoot,
+          branch: currentBranch(options.projectRoot),
           containedRoot: options.paths.runtimeDir,
         })
       ).state;
       if (
         local.execution?.stage === 'checking' &&
         local.execution.actor === 'runtime' &&
-        sameNativeCheckPlan(local, options.plans, options.paths.projectRoot)
+        sameNativeCheckPlan(local, options.plans, options.projectRoot)
       ) {
         const execution = local.execution;
         if (execution.status === 'running') {
@@ -959,7 +1086,7 @@ async function reserveNativePortableCheckPlan(options: {
             state,
             checks: authoritativePortableChecks({
               local,
-              projectRoot: options.paths.projectRoot,
+              projectRoot: options.projectRoot,
               supplied: [],
               requestedNames,
             }),
@@ -997,7 +1124,7 @@ async function reserveNativePortableCheckPlan(options: {
           local.execution.stage === 'checking' &&
           local.execution.actor === 'runtime' &&
           local.checks.some((check) => check.status === 'interrupted') &&
-          sameNativeCheckPlan(local, options.plans, options.paths.projectRoot);
+          sameNativeCheckPlan(local, options.plans, options.projectRoot);
         if (!sameInterruptedPlan) {
           throw new Error('Native check plan was already resolved with a different plan');
         }
@@ -1019,10 +1146,10 @@ async function reserveNativePortableCheckPlan(options: {
         checks: options.plans.map((plan) => {
           const previous = local.checks.find((check) => check.id === plan.id);
           if (previous?.status === 'interrupted') {
-            return resetInterruptedCheck(previous, plan, operationId, options.paths.projectRoot);
+            return resetInterruptedCheck(previous, plan, operationId, options.projectRoot);
           }
           if (previous) return { ...previous, operationId };
-          return localCheck(plan, operationId, options.paths.projectRoot);
+          return localCheck(plan, operationId, options.projectRoot);
         }),
       };
       await writeNativeLocalExecution(file, operation, { containedRoot: options.paths.runtimeDir });
@@ -1080,20 +1207,26 @@ export async function executeNativePortableCheckPlan(options: {
   paths: NativeProjectPaths;
   name: string;
   plans: NativeCheckPlan[];
+  projectRoot?: string;
 }): Promise<{ state: NativePortableState; checks: NativePortableCheckSummary[] }> {
+  const projectRoot = options.projectRoot ?? options.paths.projectRoot;
   if (new Set(options.plans.map(({ id }) => id)).size !== options.plans.length) {
     throw new Error('Native check plan contains duplicate IDs');
   }
   const normalizedPlans: NativeCheckPlan[] = [];
   const seenPlanKeys = new Set<string>();
   for (const plan of options.plans) {
-    validateNativeCheckPlan(options.paths.projectRoot, plan);
+    validateNativeCheckPlan(projectRoot, plan);
     const key = nativeCheckPlanKey(plan);
     if (seenPlanKeys.has(key)) continue;
     seenPlanKeys.add(key);
     normalizedPlans.push(plan);
   }
-  const reservation = await reserveNativePortableCheckPlan({ ...options, plans: normalizedPlans });
+  const reservation = await reserveNativePortableCheckPlan({
+    ...options,
+    plans: normalizedPlans,
+    projectRoot,
+  });
   if (reservation.kind === 'reuse') return reservation;
 
   const operationId = reservation.local.execution!.operationId;
@@ -1120,7 +1253,7 @@ export async function executeNativePortableCheckPlan(options: {
         }),
       });
       const result = await executeNativeCheck({
-        projectRoot: options.paths.projectRoot,
+        projectRoot,
         runtimeDir,
         operationId,
         plan,
@@ -1185,7 +1318,7 @@ export async function executeNativePortableCheckPlan(options: {
     state: reservation.state,
     checks: authoritativePortableChecks({
       local: finalLocal,
-      projectRoot: options.paths.projectRoot,
+      projectRoot,
       supplied: [],
     }),
   };
@@ -1210,6 +1343,7 @@ interface NativeVerifierRequestedCheckReservation {
 
 async function reserveVerifierRequestedChecks(options: {
   paths: NativeProjectPaths;
+  projectRoot: string;
   state: NativePortableState;
   local: NativeLocalExecutionState;
   envelope: NativeTrustedVerifierEnvelope<unknown>;
@@ -1245,7 +1379,7 @@ async function reserveVerifierRequestedChecks(options: {
   const existingByKeyAll = new Map<string, NativeLocalCheckState>();
   const existingKeyById = new Map<string, string>();
   for (const check of local.checks) {
-    const key = localCheckPlanKey(check, options.paths.projectRoot);
+    const key = localCheckPlanKey(check, options.projectRoot);
     existingByKeyAll.set(key, check);
     if (check.status !== 'interrupted') existingByKey.set(key, check);
     existingKeyById.set(check.id, key);
@@ -1255,7 +1389,7 @@ async function reserveVerifierRequestedChecks(options: {
   const requestedKeyById = new Map<string, string>();
   for (const request of options.response.checks) {
     const plan = requestCheckPlan(request);
-    validateNativeCheckPlan(options.paths.projectRoot, plan);
+    validateNativeCheckPlan(options.projectRoot, plan);
     const key = nativeCheckPlanKey(plan);
     const previousRequestKey = requestedKeyById.get(plan.id);
     if (previousRequestKey !== undefined && previousRequestKey !== key) {
@@ -1294,22 +1428,15 @@ async function reserveVerifierRequestedChecks(options: {
     },
     checks: [
       ...local.checks.map((check) => {
-        const key = localCheckPlanKey(check, options.paths.projectRoot);
+        const key = localCheckPlanKey(check, options.projectRoot);
         const plan = requestedByKey.get(key);
         return plan && check.status === 'interrupted'
-          ? resetInterruptedCheck(
-              check,
-              plan,
-              local.execution!.operationId,
-              options.paths.projectRoot,
-            )
+          ? resetInterruptedCheck(check, plan, local.execution!.operationId, options.projectRoot)
           : check;
       }),
       ...novel
         .filter(([key]) => !existingByKeyAll.has(key))
-        .map(([, plan]) =>
-          localCheck(plan, local.execution!.operationId, options.paths.projectRoot),
-        ),
+        .map(([, plan]) => localCheck(plan, local.execution!.operationId, options.projectRoot)),
     ],
   };
   await writeNativeLocalExecution(file, operation, { containedRoot: options.paths.runtimeDir });
@@ -1369,6 +1496,7 @@ async function updateReservedVerifierRequestedChecks(options: {
 
 async function executeReservedVerifierRequestedChecks(options: {
   paths: NativeProjectPaths;
+  projectRoot: string;
   reservation: NativeVerifierRequestedCheckReservation;
 }): Promise<{
   checks: NativePortableCheckSummary[];
@@ -1396,7 +1524,7 @@ async function executeReservedVerifierRequestedChecks(options: {
         }),
       });
       const result = await executeNativeCheck({
-        projectRoot: options.paths.projectRoot,
+        projectRoot: options.projectRoot,
         runtimeDir: nativePreferredChangeRuntimeDir(options.paths, options.reservation.state.name),
         operationId: options.reservation.local.execution!.operationId,
         plan,
@@ -1458,7 +1586,7 @@ async function executeReservedVerifierRequestedChecks(options: {
   return {
     checks: authoritativePortableChecks({
       local: operation,
-      projectRoot: options.paths.projectRoot,
+      projectRoot: options.projectRoot,
       supplied: options.reservation.suppliedChecks,
       requestedNames: options.reservation.requestedNames,
     }),
@@ -1475,19 +1603,21 @@ export async function dispatchNativePortableVerifier(options: {
   name: string;
   checks: NativePortableCheckSummary[];
   verifierExecutionId?: string | null;
+  projectRoot?: string;
 }): Promise<NativePortableState> {
   return withNativeMutationLock(
     options.paths,
     `dispatch portable verifier ${options.name}`,
     async () => {
       const state = await readNativePortableChange(options.paths, options.name);
+      const projectRoot = options.projectRoot ?? options.paths.projectRoot;
       await ensureNativePortableAcceptanceCurrentLocked({ paths: options.paths, state });
       const localBeforeDispatch = (
         await readOrRebuildNativeLocalExecution({
           file: nativeLocalExecutionFile(options.paths, state.name),
           portableState: state,
-          projectRoot: options.paths.projectRoot,
-          branch: currentBranch(options.paths.projectRoot),
+          projectRoot,
+          branch: currentBranch(projectRoot),
           containedRoot: options.paths.runtimeDir,
         })
       ).state;
@@ -1500,7 +1630,7 @@ export async function dispatchNativePortableVerifier(options: {
       }
       authoritativePortableChecks({
         local: localBeforeDispatch,
-        projectRoot: options.paths.projectRoot,
+        projectRoot,
         supplied: options.checks,
       });
       const next = reserveNativeVerifierAttempt(state);
@@ -1536,6 +1666,7 @@ export async function submitNativePortableVerifierResult(options: {
   envelope: NativeTrustedVerifierEnvelope<unknown> | unknown;
   checks: NativePortableCheckSummary[];
   maxVerifyFailures: number;
+  projectRoot?: string;
 }): Promise<{
   state: NativePortableState;
   response: NativeVerifierResponse;
@@ -1550,6 +1681,7 @@ export async function submitNativePortableVerifierResult(options: {
     `apply portable verifier ${options.name}`,
     async () => {
       const state = await readNativePortableChange(options.paths, options.name);
+      const projectRoot = options.projectRoot ?? options.paths.projectRoot;
       await ensureNativePortableAcceptanceCurrentLocked({ paths: options.paths, state });
       const local = await readCurrentLocalExecution({ paths: options.paths, state });
       const trustedEnvelope = assertCurrentVerifierEnvelope({
@@ -1582,7 +1714,7 @@ export async function submitNativePortableVerifierResult(options: {
         if (local !== null) {
           runtimeChecks = authoritativePortableChecks({
             local,
-            projectRoot: options.paths.projectRoot,
+            projectRoot,
             supplied: options.checks,
           });
         }
@@ -1598,6 +1730,7 @@ export async function submitNativePortableVerifierResult(options: {
           }
           const reservation = await reserveVerifierRequestedChecks({
             paths: options.paths,
+            projectRoot,
             state,
             local,
             envelope: trustedEnvelope,
@@ -1646,16 +1779,17 @@ export async function submitNativePortableVerifierResult(options: {
       });
       await writeNativeLocalExecution(
         nativeLocalExecutionFile(options.paths, state.name),
-        written.loop.next_action === 'resolve-verifier-blocker'
+        written.loop.next_action === 'resolve-verifier-blocker' ||
+          written.loop.next_action === 'run-final-full-verification'
           ? preservedLocalChecksForVersion({
               local,
               state: written,
-              projectRoot: options.paths.projectRoot,
+              projectRoot,
             })
           : rebuildNativeLocalExecution({
               portableState: written,
-              projectRoot: options.paths.projectRoot,
-              branch: currentBranch(options.paths.projectRoot),
+              projectRoot,
+              branch: currentBranch(projectRoot),
             }),
         { containedRoot: options.paths.runtimeDir },
       );
@@ -1681,6 +1815,7 @@ export async function submitNativePortableVerifierResult(options: {
   try {
     const requested = await executeReservedVerifierRequestedChecks({
       paths: options.paths,
+      projectRoot: options.projectRoot ?? options.paths.projectRoot,
       reservation: prepared.reservation,
     });
     return {

@@ -96,7 +96,7 @@ describe('Native portable state', () => {
     await expect(readNativePortableState(file)).resolves.toEqual(next);
   });
 
-  it('keeps the parent contract hash optional for existing portable changes', async () => {
+  it('keeps parent coordination fields optional for existing portable changes', async () => {
     const ordinary = createNativePortableState({
       name: 'ordinary-change',
       language: 'en',
@@ -106,18 +106,24 @@ describe('Native portable state', () => {
     await expect(readNativePortableState(file)).resolves.not.toHaveProperty(
       'children_contract_hash',
     );
+    await expect(readNativePortableState(file)).resolves.not.toHaveProperty('coordination_mode');
 
     const parent = parseNativePortableState({
       ...ordinary,
       children_contract_hash: 'a'.repeat(64),
+      coordination_mode: 'multi-session',
     });
     await writeNativePortableState(file, parent, { containedRoot: root });
     await expect(readNativePortableState(file)).resolves.toMatchObject({
       children_contract_hash: 'a'.repeat(64),
+      coordination_mode: 'multi-session',
     });
     expect(() =>
       parseNativePortableState({ ...ordinary, children_contract_hash: 'not-a-hash' }),
     ).toThrow(/children contract hash/iu);
+    expect(() => parseNativePortableState({ ...ordinary, coordination_mode: 'automatic' })).toThrow(
+      /coordination mode/iu,
+    );
   });
 
   it('keeps only 50 history entries and folds older facts into a non-decision overflow', () => {
@@ -232,6 +238,11 @@ describe('Native portable state', () => {
         checks_truncated: false,
         known_limits: [],
         known_limits_truncated: false,
+        review: {
+          status: 'passed',
+          summary: toNativePortableText('Read-only review passed.'),
+          reviewer_execution_ref: 'reviewer-1',
+        },
         submitted_at: '2026-08-09T00:01:00.000Z',
       },
       verification: {

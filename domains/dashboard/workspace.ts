@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-import { inspectGitWorktree, listGitWorktreeRoots } from '../../platform/paths/git-worktree.js';
+import { inspectGitWorktree, listGitWorktrees } from '../../platform/paths/git-worktree.js';
 import { PROJECT_CONFIG_FILE } from '../comet-native/native-paths.js';
 
 const DASHBOARD_CHANGE_LOCATOR_PREFIX = 'dashboard-change-v1';
@@ -41,6 +41,30 @@ function workspaceLabel(projectRoot: string, branch: string | null): string {
   return branch ?? `detached:${path.basename(projectRoot)}`;
 }
 
+function isDirectory(projectRoot: string): boolean {
+  try {
+    return existsSync(projectRoot) && statSync(projectRoot).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function isInternalRuntimeWorktree(projectRoot: string, primaryRoot: string): boolean {
+  const relative = path.relative(primaryRoot, projectRoot).replaceAll('\\', '/').toLowerCase();
+  return relative === '.comet/runtime' || relative.startsWith('.comet/runtime/');
+}
+
+export function isDashboardWorkspaceSourceEligible(
+  requestedRoot: string,
+  source: Pick<DashboardWorkspaceSource, 'projectRoot' | 'branch' | 'current'>,
+): boolean {
+  const sourceRoot = path.resolve(source.projectRoot);
+  if (!isDirectory(sourceRoot)) return false;
+  if (source.current) return sameDashboardPath(sourceRoot, requestedRoot);
+  if (source.branch === null) return false;
+  return !isInternalRuntimeWorktree(sourceRoot, path.resolve(requestedRoot));
+}
+
 function hasProjectConfig(root: string): boolean {
   return existsSync(path.join(root, ...PROJECT_CONFIG_FILE.split('/')));
 }
@@ -65,12 +89,20 @@ export function collectDashboardWorkspaceSources(projectRoot: string): Dashboard
       ? requestedSubdir
       : null;
   const currentRoot = monorepoSubdir ? requestedRoot : worktreeRoot;
-  const discovered = listGitWorktreeRoots(worktreeRoot).map((root) => {
-    if (!monorepoSubdir) return root;
-    const candidate = path.join(root, monorepoSubdir);
-    return hasProjectConfig(candidate) ? candidate : root;
-  });
-  const roots = discovered.length > 0 ? discovered : [requestedRoot];
+  const discovered = listGitWorktrees(worktreeRoot).map((entry) => ({
+    entry,
+    root:
+      monorepoSubdir && hasProjectConfig(path.join(entry.root, monorepoSubdir))
+        ? path.join(entry.root, monorepoSubdir)
+        : entry.root,
+  }));
+  const primaryRoot = requestedContext.primaryWorktreeRoot ?? requestedRoot;
+  const eligible = discovered.filter(
+    ({ entry, root }) =>
+      sameDashboardPath(root, currentRoot) ||
+      (!entry.detached && isDirectory(root) && !isInternalRuntimeWorktree(root, primaryRoot)),
+  );
+  const roots = eligible.length > 0 ? eligible.map(({ root }) => root) : [requestedRoot];
   if (!roots.some((candidate) => sameDashboardPath(candidate, currentRoot))) {
     roots.push(currentRoot);
   }
@@ -83,8 +115,10 @@ export function collectDashboardWorkspaceSources(projectRoot: string): Dashboard
 
   return [...unique.values()]
     .map((candidate): DashboardWorkspaceSource => {
-      const context = inspectGitWorktree(candidate);
-      const branch = context.currentBranch;
+      const discoveredEntry = eligible.find(({ root }) => sameDashboardPath(root, candidate));
+      const branch =
+        discoveredEntry?.entry.branch ??
+        (sameDashboardPath(candidate, currentRoot) ? requestedContext.currentBranch : null);
       return {
         id: dashboardWorkspaceId(candidate),
         label: workspaceLabel(candidate, branch),

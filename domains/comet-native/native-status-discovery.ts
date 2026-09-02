@@ -339,6 +339,7 @@ async function inspectCandidate(
   candidate: NativeStatusCandidate,
   details: boolean,
   acceptanceCursor?: string,
+  detailsCursor?: string,
 ): Promise<NativeDiscoveredStatusProjection> {
   if (candidate.kind === 'portable') {
     if (acceptanceCursor) {
@@ -349,6 +350,7 @@ async function inspectCandidate(
       paths: candidate.source.paths,
       name: candidate.name,
       details,
+      ...(detailsCursor ? { cursor: detailsCursor } : {}),
     });
   }
   return inspectLegacyCandidate(candidate, details, acceptanceCursor);
@@ -359,6 +361,7 @@ export async function inspectDiscoveredNativeStatus(options: {
   name: string;
   details?: boolean;
   acceptanceCursor?: string;
+  detailsCursor?: string;
 }): Promise<NativeDiscoveredStatusProjection> {
   const sources = await discoverSources(options.projectRoot);
   const candidates = (await discoverCandidates(options.projectRoot, sources)).filter(
@@ -381,7 +384,12 @@ export async function inspectDiscoveredNativeStatus(options: {
         .join(', ')}`,
     );
   }
-  return inspectCandidate(candidates[0], options.details ?? false, options.acceptanceCursor);
+  return inspectCandidate(
+    candidates[0],
+    options.details ?? false,
+    options.acceptanceCursor,
+    options.detailsCursor,
+  );
 }
 
 export async function listDiscoveredNativeStatusPage(options: {
