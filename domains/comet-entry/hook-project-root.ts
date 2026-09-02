@@ -1,8 +1,15 @@
 import { promises as fs, realpathSync } from 'fs';
 import path from 'path';
 
+import { discoverNativeProject } from '../comet-native/native-paths.js';
+import { readWorkflowProjectConfig } from '../workflow-contract/project-config-reader.js';
 import { listGitWorktreeRoots } from '../../platform/paths/git-worktree.js';
 import type { CometHookRequest } from './hook-types.js';
+
+interface ParsedHookArgs {
+  platformId: string;
+  projectRoot?: string;
+}
 
 function physicalPath(value: string): string {
   const resolved = path.resolve(value);
@@ -109,4 +116,30 @@ export async function resolveCometHookProjectRoot(
     await assertRebasedWorktreeReady(selected.physicalRoot);
   }
   return selected.logicalRoot ?? selected.physicalRoot;
+}
+
+export async function projectRootFrom(
+  parsed: ParsedHookArgs,
+  request?: CometHookRequest,
+): Promise<string | null> {
+  if (parsed.projectRoot) {
+    const candidate = request
+      ? await resolveCometHookProjectRoot(parsed.projectRoot, request)
+      : parsed.projectRoot;
+    return configuredProjectFrom(candidate);
+  }
+  // A Router without --project-root is a legacy/global installation. It must
+  // use the host-provided working directory when one is available; the
+  // process cwd is often the directory where the global Hook was installed,
+  // not the project that owns the current tool request. Without a trusted
+  // request cwd there is no safe project to inspect, so leave the legacy Hook
+  // neutral instead of applying another project's phase guard.
+  if (!request?.cwd) return null;
+
+  return configuredProjectFrom(request.cwd);
+}
+
+async function configuredProjectFrom(projectRoot: string): Promise<string | null> {
+  const discovered = await discoverNativeProject(projectRoot);
+  return (await readWorkflowProjectConfig(discovered)) === null ? null : discovered;
 }

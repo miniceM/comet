@@ -47,7 +47,7 @@ const policy = readText('docs/architecture/enterprise-guard/policy.md');
 const policyEngine = readText('domains/enterprise-guard/policy-engine.ts');
 const findings = readText('domains/enterprise-guard/findings.ts');
 const exceptionReader = readText('domains/enterprise-guard/exceptions.ts');
-const hookBundle = readText('assets/skills/comet/scripts/comet-enterprise-hook.mjs');
+const gatewayBundle = readText('assets/skills/comet/scripts/comet-enterprise-gateway.mjs');
 const reviewProtocol = readText('docs/architecture/enterprise-guard/review-consumption.md');
 const packageJson = readJson('package.json');
 
@@ -83,7 +83,7 @@ if (baseline && Array.isArray(baseline.ruleIds)) {
   for (const ruleId of baseline.ruleIds) {
     requireText(policy, ruleId, 'policy catalog');
     requireText(policyEngine, ruleId, 'policy engine');
-    requireText(hookBundle, ruleId, 'published Hook bundle');
+    requireText(gatewayBundle, ruleId, 'published Hook bundle');
   }
 }
 

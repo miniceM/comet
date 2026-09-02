@@ -1,71 +1,29 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
-export const MAX_ENTERPRISE_HOOK_INPUT_BYTES = 256 * 1024;
-export const MAX_ENTERPRISE_HOOK_FIELD_BYTES = 64 * 1024;
+import { isWriteTool } from './normalized-event.js';
+import type {
+  Decision,
+  Enforcement,
+  EnterpriseGuardDecision,
+  EnterpriseHookInput,
+  EnterpriseRuleResult,
+} from './normalized-event.js';
 
-type Enforcement = 'hard' | 'soft';
-type Decision = 'allow' | 'deny' | 'warn' | 'abstain';
-type ParseStatus = 'complete' | 'partial' | 'failed' | 'unavailable';
+export type {
+  CapturedString,
+  CapturedJson,
+  EnterpriseGuardDecision,
+  EnterpriseHookInput,
+  EnterpriseRuleResult,
+} from './normalized-event.js';
+export {
+  MAX_ENTERPRISE_HOOK_FIELD_BYTES,
+  MAX_ENTERPRISE_HOOK_INPUT_BYTES,
+} from './normalized-event.js';
+export { parseClaudeEnterpriseHookInput } from './input-codecs/claude.js';
+
 type ExceptionScopeKind = 'path' | 'branch' | 'repository' | 'command';
-
-export type CapturedString = {
-  value: string | null;
-  capturedBytes: number;
-  originalBytes: number;
-  truncated: boolean;
-};
-
-export type CapturedJson = {
-  value: unknown;
-  capturedBytes: number;
-  originalBytes: number;
-  truncated: boolean;
-};
-
-export type EnterpriseHookInput = {
-  schemaVersion: 'comet.enterprise-hook-input.v1';
-  platform: {
-    id: string;
-    surface: 'project' | 'managed-global' | 'ci' | 'unknown';
-    version?: string | null;
-  };
-  event: { name: string; preAction: boolean; blockingCapable: boolean };
-  workingDirectory: CapturedString;
-  tool: { name: CapturedString; input: CapturedJson };
-  command: CapturedString;
-  writes: Array<{
-    operation: 'create' | 'edit' | 'delete' | 'rename' | 'unknown';
-    path: CapturedString;
-    fragment: CapturedString;
-  }>;
-  parse: { status: ParseStatus; errors: string[] };
-  truncation: {
-    maxCapturedBytes: number;
-    fields: Array<{
-      path: string;
-      capturedBytes: number;
-      originalBytes: number;
-      truncated: boolean;
-    }>;
-  };
-};
-
-export type EnterpriseRuleResult = {
-  schemaVersion: 'comet.enterprise-rule-result.v1';
-  ruleId: string;
-  ruleVersion: number;
-  enforcement: Enforcement;
-  decision: Decision;
-  reason: string;
-  evidence: Array<{
-    kind: 'path' | 'command' | 'write-fragment' | 'parse' | 'policy' | 'exception';
-    subject: string;
-    redacted?: boolean;
-  }>;
-  exceptionId: string | null;
-  inputDigest: string;
-};
 
 export type EnterpriseExceptionRecord = {
   schemaVersion: 'comet.enterprise-exception.v1';
@@ -80,21 +38,11 @@ export type EnterpriseExceptionRecord = {
   status: 'active' | 'revoked' | 'expired';
 };
 
-export type EnterpriseGuardDecision = {
-  allowed: boolean;
-  ruleId: string | null;
-  reason: string;
-  warningRuleIds: string[];
-  results: EnterpriseRuleResult[];
-};
-
 export type EnterprisePolicyOptions = {
   exceptions?: readonly EnterpriseExceptionRecord[];
   now?: Date;
   protectedBranches?: readonly string[];
 };
-
-type JsonRecord = Record<string, unknown>;
 
 const AWS_ACCESS_KEY = /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/u;
 const PRIVATE_KEY = /-----BEGIN(?: [A-Z0-9]{1,40})? PRIVATE KEY-----/u;
@@ -103,68 +51,8 @@ const SECRET_ASSIGNMENT =
 const RULE_VERSION = 1;
 const DEFAULT_PROTECTED_BRANCHES = new Set(['main', 'master']);
 
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function sha256(value: string): string {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`;
-}
-
-function boundedString(value: unknown, maxBytes = MAX_ENTERPRISE_HOOK_FIELD_BYTES): CapturedString {
-  if (typeof value !== 'string') {
-    return { value: null, capturedBytes: 0, originalBytes: 0, truncated: false };
-  }
-  const bytes = Buffer.from(value, 'utf8');
-  const captured = bytes.subarray(0, maxBytes);
-  return {
-    value: captured.toString('utf8'),
-    capturedBytes: captured.length,
-    originalBytes: bytes.length,
-    truncated: bytes.length > maxBytes,
-  };
-}
-
-function boundedJson(value: unknown): CapturedJson {
-  const serialized = JSON.stringify(value ?? null);
-  const captured = boundedString(serialized);
-  return {
-    value: captured.truncated ? null : (value ?? null),
-    capturedBytes: captured.capturedBytes,
-    originalBytes: captured.originalBytes,
-    truncated: captured.truncated,
-  };
-}
-
-function truncationField(fieldPath: string, value: CapturedString | CapturedJson) {
-  return {
-    path: fieldPath,
-    capturedBytes: value.capturedBytes,
-    originalBytes: value.originalBytes,
-    truncated: value.truncated,
-  };
-}
-
-function rawInput(source: string): { source: string; field: ReturnType<typeof truncationField> } {
-  const bytes = Buffer.from(source, 'utf8');
-  const captured = bytes.subarray(0, MAX_ENTERPRISE_HOOK_INPUT_BYTES);
-  return {
-    source: captured.toString('utf8'),
-    field: {
-      path: 'raw',
-      capturedBytes: captured.length,
-      originalBytes: bytes.length,
-      truncated: bytes.length > MAX_ENTERPRISE_HOOK_INPUT_BYTES,
-    },
-  };
-}
-
-function writeOperation(
-  toolName: string | null,
-): EnterpriseHookInput['writes'][number]['operation'] {
-  if (toolName === 'Write') return 'create';
-  if (toolName === 'Edit') return 'edit';
-  return 'unknown';
 }
 
 function inputDigest(input: EnterpriseHookInput): string {
@@ -205,10 +93,6 @@ function result(
     exceptionId: null,
     inputDigest: inputDigest(input),
   };
-}
-
-function isWriteTool(name: string | null): boolean {
-  return name === 'Write' || name === 'Edit';
 }
 
 function isBashTool(name: string | null): boolean {
@@ -348,70 +232,6 @@ function inputFailure(input: EnterpriseHookInput): EnterpriseRuleResult {
   return result(input, 'EG-HARD-INPUT-001', 'hard', 'deny', 'Required Hook input is unavailable', [
     { kind: 'parse', subject: input.parse.status, redacted: true },
   ]);
-}
-
-/** Convert Claude Code raw PreToolUse stdin into the versioned EnterpriseHookInput v1 contract. */
-export function parseClaudeEnterpriseHookInput(source: string): EnterpriseHookInput {
-  const raw = rawInput(source);
-  const fields = [raw.field];
-  let parsed: JsonRecord = {};
-  let parse: EnterpriseHookInput['parse'] = { status: 'complete', errors: [] };
-  try {
-    const value = JSON.parse(raw.source) as unknown;
-    if (!isRecord(value)) throw new Error('Hook input must be a JSON object');
-    parsed = value;
-  } catch (error) {
-    parse = {
-      status: 'failed',
-      errors: [
-        error instanceof Error
-          ? error.message.replace(/\s+at position \d+$/u, '')
-          : 'Invalid JSON input',
-      ],
-    };
-  }
-  const toolInputValue = isRecord(parsed.tool_input) ? parsed.tool_input : {};
-  const workingDirectory = boundedString(parsed.cwd);
-  const toolName = boundedString(parsed.tool_name);
-  const toolInput = boundedJson(toolInputValue);
-  const command = boundedString(toolInputValue.command);
-  fields.push(
-    truncationField('workingDirectory', workingDirectory),
-    truncationField('tool.name', toolName),
-    truncationField('tool.input', toolInput),
-    truncationField('command', command),
-  );
-
-  const pathValue = boundedString(
-    toolInputValue.file_path ?? toolInputValue.path ?? toolInputValue.filePath,
-  );
-  const fragmentValue = boundedString(
-    toolInputValue.content ?? toolInputValue.new_string ?? toolInputValue.patch,
-  );
-  const writes = isWriteTool(toolName.value)
-    ? [{ operation: writeOperation(toolName.value), path: pathValue, fragment: fragmentValue }]
-    : [];
-  for (const [index, write] of writes.entries()) {
-    fields.push(
-      truncationField(`writes.${index}.path`, write.path),
-      truncationField(`writes.${index}.fragment`, write.fragment),
-    );
-  }
-  if (parse.status === 'complete' && fields.some((field) => field.truncated)) {
-    parse = { status: 'partial', errors: ['Hook input exceeded a bounded capture limit'] };
-  }
-
-  return {
-    schemaVersion: 'comet.enterprise-hook-input.v1',
-    platform: { id: 'claude', surface: 'project', version: null },
-    event: { name: 'PreToolUse', preAction: true, blockingCapable: true },
-    workingDirectory,
-    tool: { name: toolName, input: toolInput },
-    command,
-    writes,
-    parse,
-    truncation: { maxCapturedBytes: MAX_ENTERPRISE_HOOK_INPUT_BYTES, fields },
-  };
 }
 
 /** Evaluate each Enterprise Guard rule independently, then aggregate platform-safe HARD/SOFT decisions. */

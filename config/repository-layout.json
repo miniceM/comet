@@ -70,8 +70,8 @@
     }
   },
   "enterpriseGuardRuntime": {
-    "entry": "domains/enterprise-guard/enterprise-hook-entry.ts",
-    "output": "assets/skills/comet/scripts/comet-enterprise-hook.mjs"
+    "entry": "domains/enterprise-guard/enterprise-gateway-entry.ts",
+    "output": "assets/skills/comet/scripts/comet-enterprise-gateway.mjs"
   },
   "allowedTopLevelEntries": [
     ".agents",

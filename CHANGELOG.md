@@ -6,7 +6,7 @@ All notable changes to @rpamis/comet will be documented in this file.
 
 ### Added
 
-- **Enterprise Guard for Claude Code**: `comet init` and `comet update` now install an independent managed `PreToolUse` Hook that blocks approved high-risk writes, embedded credentials or private keys, filesystem-root recursive deletion, and force-push commands without changing the existing Hook Router workflow behavior. `comet doctor --repair` restores a missing Guard entry, and a full `comet uninstall` removes only Comet's Guard entry while preserving user and Router hooks.
+- **Enterprise Guard for Claude Code**: `comet init` and `comet update` now install one managed `PreToolUse` Gateway that evaluates high-risk writes, embedded credentials or private keys, filesystem-root recursive deletion, and force-push commands before Comet workflow routing. Guard evaluation and required audit persistence fail closed, `comet doctor --repair` restores missing project or user-local runtimes before retiring legacy Hooks, uninstall preserves user entries, and coverage reports peer-Hook ordering limits as best-effort with CI fallback.
 - **Enterprise Guard audit integrity**: Guard findings are now redacted, append safely under concurrent Hooks, and expose a schema-validated reader for review and CI consumers; corruption or a recorded hard denial blocks review.
 
 ### Changed

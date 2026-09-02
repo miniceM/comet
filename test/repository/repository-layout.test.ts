@@ -56,8 +56,8 @@ describe('repository layout registry', () => {
       path.resolve('assets', 'skills', 'comet', 'scripts', 'comet-entry-runtime.mjs'),
     );
     expect(layout.enterpriseGuardRuntime).toEqual({
-      entry: 'domains/enterprise-guard/enterprise-hook-entry.ts',
-      output: 'assets/skills/comet/scripts/comet-enterprise-hook.mjs',
+      entry: 'domains/enterprise-guard/enterprise-gateway-entry.ts',
+      output: 'assets/skills/comet/scripts/comet-enterprise-gateway.mjs',
     });
   });
 

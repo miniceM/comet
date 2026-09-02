@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  evaluateEnterpriseHookInput,
-  parseClaudeEnterpriseHookInput,
-} from '../../../domains/enterprise-guard/policy-engine.js';
+import { parseClaudeEnterpriseHookInput } from '../../../domains/enterprise-guard/input-codecs/claude.js';
+import { evaluateEnterpriseHookInput } from '../../../domains/enterprise-guard/policy-engine.js';
 
 describe('enterprise guard policy engine', () => {
   it('maps Claude Write, Edit, and Bash input to the EnterpriseHookInput v1 contract', () => {

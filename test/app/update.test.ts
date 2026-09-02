@@ -88,6 +88,19 @@ const claudePlatform: Platform = {
 
 const manifestPath = path.resolve('assets', 'manifest.json');
 
+type InstalledHook = { type?: string; command?: string; args?: unknown };
+
+function installedHookIncludesScript(hook: InstalledHook, scriptName: string): boolean {
+  return (
+    hook.command?.includes(scriptName) === true ||
+    (Array.isArray(hook.args) &&
+      hook.args.some(
+        (argument): argument is string =>
+          typeof argument === 'string' && argument.includes(scriptName),
+      ))
+  );
+}
+
 const RETIRED_NATIVE_BUNDLES = [
   'comet-native/scripts/comet-native-checkpoint.mjs',
   'comet-native/scripts/comet-native-check.mjs',
@@ -3085,8 +3098,8 @@ describe('update command helpers', () => {
       await fs.readFile(path.join(tmpDir, '.claude', 'settings.local.json'), 'utf8'),
     ) as { keep: string; hooks: { PreToolUse: Array<{ hooks: Array<{ command: string }> }> } };
     expect(settings.keep).toBe('classic hook');
-    expect(JSON.stringify(settings.hooks)).toContain('comet-hook-router.mjs');
-    expect(JSON.stringify(settings.hooks)).toContain('comet-enterprise-hook.mjs');
+    expect(JSON.stringify(settings.hooks)).toContain('comet-enterprise-gateway.mjs');
+    expect(JSON.stringify(settings.hooks)).not.toContain('comet-enterprise-hook.mjs');
     expect(JSON.stringify(settings.hooks)).not.toContain('comet-native-hook-guard.mjs');
     const agents = await fs.readFile(path.join(tmpDir, 'AGENTS.md'), 'utf8');
     const claude = await fs.readFile(path.join(tmpDir, 'CLAUDE.md'), 'utf8');
@@ -3101,6 +3114,93 @@ describe('update command helpers', () => {
     expect(claude).toContain('# User\nAlso keep this.');
     expect(mockedSelect).not.toHaveBeenCalled();
     await expect(fs.readFile(selectionPath, 'utf8')).resolves.toBe(legacySelection);
+  });
+
+  it('migrates a legacy double Hook into exactly one Enterprise Gateway across repeat updates', async () => {
+    const fakeHome = path.join(tmpDir, 'gateway-migration-home');
+    await fs.mkdir(path.join(tmpDir, '.comet'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.comet', 'config.yaml'),
+      [
+        'schema: comet.project.v1',
+        'default_workflow: native',
+        'workflows: [native]',
+        'native:',
+        '  artifact_root: docs',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'comet'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'comet', 'SKILL.md'),
+      '# Stale Comet\n',
+      'utf8',
+    );
+    const settingsPath = path.join(tmpDir, '.claude', 'settings.local.json');
+    const projectRoot = tmpDir.replaceAll('\\', '/');
+    const skillsRoot = `${projectRoot}/.claude/skills`;
+    await fs.writeFile(
+      settingsPath,
+      JSON.stringify(
+        {
+          keep: 'user settings',
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: 'Write|Edit',
+                hooks: [
+                  {
+                    type: 'command',
+                    command: `node "${skillsRoot}/comet/scripts/comet-hook-router.mjs" --platform "claude" --project-root "${projectRoot}"`,
+                  },
+                  { type: 'command', command: 'node user-hook.mjs' },
+                ],
+              },
+              {
+                matcher: 'Write|Edit|Bash',
+                hooks: [
+                  {
+                    type: 'command',
+                    command: `node "${skillsRoot}/comet/scripts/comet-enterprise-hook.mjs" --project-root "${projectRoot}" "--platform" "claude"`,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { json: true, skipNpm: true });
+      await updateCommand(tmpDir, { json: true, skipNpm: true });
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    const settings = JSON.parse(await fs.readFile(settingsPath, 'utf8')) as {
+      keep: string;
+      hooks: { PreToolUse: Array<{ hooks: InstalledHook[] }> };
+    };
+    const hooks = settings.hooks.PreToolUse.flatMap((group) => group.hooks);
+    expect(settings.keep).toBe('user settings');
+    expect(
+      hooks.filter((hook) => installedHookIncludesScript(hook, 'comet-enterprise-gateway.mjs')),
+    ).toHaveLength(1);
+    expect(hooks.some((hook) => installedHookIncludesScript(hook, 'comet-hook-router.mjs'))).toBe(
+      false,
+    );
+    expect(
+      hooks.some((hook) => installedHookIncludesScript(hook, 'comet-enterprise-hook.mjs')),
+    ).toBe(false);
+    expect(hooks).toContainEqual({ type: 'command', command: 'node user-hook.mjs' });
   });
 
   it('upgrades a beta17 Native project without leaving retired bundles or hiding config', async () => {

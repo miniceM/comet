@@ -30,6 +30,25 @@ import {
 
 const stateScript = path.resolve('assets', 'skills', 'comet', 'scripts', 'comet-state.mjs');
 
+type DoctorHook = { type?: string; command?: string; args?: unknown };
+
+function readDoctorHooks(settings: {
+  hooks: { PreToolUse: Array<{ hooks: DoctorHook[] }> };
+}): DoctorHook[] {
+  return settings.hooks.PreToolUse.flatMap((group) => group.hooks);
+}
+
+function hookIncludesScript(hook: DoctorHook, scriptName: string): boolean {
+  return (
+    hook.command?.includes(scriptName) === true ||
+    (Array.isArray(hook.args) &&
+      hook.args.some(
+        (argument): argument is string =>
+          typeof argument === 'string' && argument.includes(scriptName),
+      ))
+  );
+}
+
 async function installManagedCometSkills(baseDir: string, platformDir = '.claude'): Promise<void> {
   const manifest = JSON.parse(
     await fs.readFile(path.resolve('assets', 'manifest.json'), 'utf8'),
@@ -1353,8 +1372,12 @@ describe('doctor command', () => {
     );
   });
 
-  it('warns when a detected complete Skill install is missing its Rule and Hook', async () => {
+  it('warns when a detected complete Skill install is missing its Rule and Gateway Hook', async () => {
     await installManagedCometSkills(tmpDir);
+    await fs.copyFile(
+      path.resolve('assets', 'skills', 'comet', 'scripts', 'comet-enterprise-gateway.mjs'),
+      path.join(tmpDir, '.claude', 'skills', 'comet', 'scripts', 'comet-enterprise-gateway.mjs'),
+    );
 
     const results = await collectDoctorResults(tmpDir);
 
@@ -1364,27 +1387,27 @@ describe('doctor command', () => {
         message: expect.stringContaining('comet update --scope project'),
       },
     );
-    expect(results.find((result) => result.check === 'hooks: Claude Code (project)')).toMatchObject(
-      {
-        status: 'warn',
-        message: expect.stringContaining('comet update --scope project'),
-      },
+    const gatewayCheck = results.find(
+      (result) => result.check === 'enterprise gateway: Claude Code (project)',
     );
-    expect(
-      results.find((result) => result.check === 'enterprise guard: Claude Code (project)'),
-    ).toMatchObject({
+    expect(gatewayCheck).toMatchObject({
       status: 'warn',
-      message: expect.stringContaining('comet doctor --repair --scope project'),
+      message: expect.stringContaining('managed Enterprise Gateway missing'),
     });
+    expect(gatewayCheck?.message).toContain('comet doctor --repair --scope project');
   });
 
-  it('passes Rule and Hook checks when the managed components are installed', async () => {
+  it('passes Rule and Gateway Hook checks when the managed components are installed', async () => {
     const claude = PLATFORMS.find((platform) => platform.id === 'claude');
     expect(claude).toBeDefined();
     await installManagedCometSkills(tmpDir);
     await copyCometRulesForPlatform(tmpDir, claude!, true, 'zh', 'project');
     await installCometHooksForPlatform(tmpDir, claude!, 'project');
     await installEnterpriseGuard(tmpDir, claude!, 'project');
+    await fs.copyFile(
+      path.resolve('assets', 'skills', 'comet', 'scripts', 'comet-enterprise-gateway.mjs'),
+      path.join(tmpDir, '.claude', 'skills', 'comet', 'scripts', 'comet-enterprise-gateway.mjs'),
+    );
 
     const results = await collectDoctorResults(tmpDir);
 
@@ -1393,14 +1416,12 @@ describe('doctor command', () => {
         status: 'pass',
       },
     );
-    expect(results.find((result) => result.check === 'hooks: Claude Code (project)')).toMatchObject(
-      {
-        status: 'pass',
-      },
-    );
     expect(
-      results.find((result) => result.check === 'enterprise guard: Claude Code (project)'),
-    ).toMatchObject({ status: 'pass' });
+      results.find((result) => result.check === 'enterprise gateway: Claude Code (project)'),
+    ).toMatchObject({
+      status: 'pass',
+      message: 'exactly one managed Enterprise Gateway present',
+    });
   });
 
   it('reports rules injection and CI fallback for a non-enforced Hook platform', async () => {
@@ -1419,7 +1440,6 @@ describe('doctor command', () => {
   });
 
   it.each([
-    'claude',
     'codex',
     'windsurf',
     'github-copilot',
@@ -1446,14 +1466,198 @@ describe('doctor command', () => {
   });
 
   it('detects and repairs an outdated Hook Router runtime', async () => {
-    const claude = PLATFORMS.find((platform) => platform.id === 'claude')!;
-    await installManagedCometSkills(tmpDir);
-    await installCometHooksForPlatform(tmpDir, claude, 'project');
+    const codex = PLATFORMS.find((platform) => platform.id === 'codex')!;
+    await installManagedCometSkills(tmpDir, '.agents');
+    await installCometHooksForPlatform(tmpDir, codex, 'project');
 
     const before = await collectDoctorResults(tmpDir);
+    expect(before.find((result) => result.check === 'hook runtime: Codex (project)')).toMatchObject(
+      { status: 'warn', message: expect.stringContaining('outdated') },
+    );
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await doctorCommand(tmpDir, { json: true, repair: true, scope: 'project', homeDir: tmpDir });
+    } finally {
+      log.mockRestore();
+    }
+
+    const installed = path.join(
+      tmpDir,
+      '.agents',
+      'skills',
+      'comet',
+      'scripts',
+      'comet-hook-router.mjs',
+    );
+    await expect(fs.readFile(installed)).resolves.toEqual(
+      await fs.readFile(
+        path.resolve('assets', 'skills', 'comet', 'scripts', 'comet-hook-router.mjs'),
+      ),
+    );
+    const after = await collectDoctorResults(tmpDir);
+    expect(after.find((result) => result.check === 'hook runtime: Codex (project)')).toMatchObject({
+      status: 'pass',
+      message: 'current',
+    });
     expect(
-      before.find((result) => result.check === 'hook runtime: Claude Code (project)'),
-    ).toMatchObject({ status: 'warn', message: expect.stringContaining('outdated') });
+      after.find((result) => result.check === 'enterprise guard: Codex (project)'),
+    ).toMatchObject({ status: 'pass' });
+  });
+
+  it('warns on a legacy double Hook and repairs it into exactly one Enterprise Gateway', async () => {
+    await installManagedCometSkills(tmpDir);
+    const hookPath = path.join(tmpDir, '.claude', 'settings.local.json');
+    const projectRoot = tmpDir.replaceAll('\\', '/');
+    const skillsRoot = `${projectRoot}/.claude/skills`;
+    await fs.writeFile(
+      hookPath,
+      JSON.stringify({
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: 'Write|Edit',
+              hooks: [
+                {
+                  type: 'command',
+                  command: `node "${skillsRoot}/comet/scripts/comet-hook-router.mjs" --platform "claude" --project-root "${projectRoot}"`,
+                },
+                { type: 'command', command: 'node user-hook.mjs' },
+              ],
+            },
+            {
+              matcher: 'Write|Edit|Bash',
+              hooks: [
+                {
+                  type: 'command',
+                  command: `node "${skillsRoot}/comet/scripts/comet-enterprise-hook.mjs" --project-root "${projectRoot}" "--platform" "claude"`,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      'utf8',
+    );
+
+    const before = await collectDoctorResults(tmpDir);
+    const beforeCheck = before.find(
+      (result) => result.check === 'enterprise gateway: Claude Code (project)',
+    );
+    expect(beforeCheck).toMatchObject({
+      status: 'warn',
+      message: expect.stringContaining('legacy managed Hook coexists'),
+    });
+    expect(beforeCheck?.message).toContain('comet doctor --repair --scope project');
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await doctorCommand(tmpDir, { json: true, repair: true, scope: 'project', homeDir: tmpDir });
+    } finally {
+      log.mockRestore();
+    }
+
+    const settings = JSON.parse(await fs.readFile(hookPath, 'utf8')) as {
+      hooks: { PreToolUse: Array<{ hooks: DoctorHook[] }> };
+    };
+    const hooks = readDoctorHooks(settings);
+    expect(
+      hooks.filter((hook) => hookIncludesScript(hook, 'comet-enterprise-gateway.mjs')),
+    ).toHaveLength(1);
+    expect(hooks.some((hook) => hookIncludesScript(hook, 'comet-hook-router.mjs'))).toBe(false);
+    expect(hooks.some((hook) => hookIncludesScript(hook, 'comet-enterprise-hook.mjs'))).toBe(false);
+    expect(hooks).toContainEqual({ type: 'command', command: 'node user-hook.mjs' });
+
+    const after = await collectDoctorResults(tmpDir);
+    expect(
+      after.find((result) => result.check === 'enterprise gateway: Claude Code (project)'),
+    ).toMatchObject({
+      status: 'pass',
+      message: 'exactly one managed Enterprise Gateway present',
+    });
+  });
+
+  it('restores a global hook-only Gateway runtime before retiring legacy Hooks', async () => {
+    const hookPath = path.join(tmpDir, '.claude', 'settings.local.json');
+    const skillsRoot = path.join(tmpDir, '.claude', 'skills').replaceAll('\\', '/');
+    await fs.mkdir(path.dirname(hookPath), { recursive: true });
+    await fs.writeFile(
+      hookPath,
+      JSON.stringify({
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: 'Write|Edit',
+              hooks: [
+                {
+                  type: 'command',
+                  command: `node "${skillsRoot}/comet/scripts/comet-hook-router.mjs" --platform "claude"`,
+                },
+                { type: 'command', command: 'node user-hook.mjs' },
+              ],
+            },
+            {
+              matcher: 'Write|Edit|Bash',
+              hooks: [
+                {
+                  type: 'command',
+                  command: `node "${skillsRoot}/comet/scripts/comet-enterprise-hook.mjs" --project-root "${tmpDir.replaceAll('\\', '/')}" --platform "claude"`,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      'utf8',
+    );
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await doctorCommand(tmpDir, { json: true, repair: true, scope: 'global', homeDir: tmpDir });
+    } finally {
+      log.mockRestore();
+    }
+
+    const gatewayRuntime = path.join(
+      tmpDir,
+      '.claude',
+      'skills',
+      'comet',
+      'scripts',
+      'comet-enterprise-gateway.mjs',
+    );
+    await expect(fs.readFile(gatewayRuntime)).resolves.toEqual(
+      await fs.readFile(
+        path.resolve('assets', 'skills', 'comet', 'scripts', 'comet-enterprise-gateway.mjs'),
+      ),
+    );
+
+    const settings = JSON.parse(await fs.readFile(hookPath, 'utf8')) as {
+      hooks: { PreToolUse: Array<{ hooks: DoctorHook[] }> };
+    };
+    const hooks = readDoctorHooks(settings);
+    expect(
+      hooks.filter((hook) => hookIncludesScript(hook, 'comet-enterprise-gateway.mjs')),
+    ).toHaveLength(1);
+    expect(hooks.some((hook) => hookIncludesScript(hook, 'comet-hook-router.mjs'))).toBe(false);
+    expect(hooks.some((hook) => hookIncludesScript(hook, 'comet-enterprise-hook.mjs'))).toBe(false);
+    expect(hooks).toContainEqual({ type: 'command', command: 'node user-hook.mjs' });
+  });
+
+  it('detects and repairs an outdated Enterprise Gateway runtime', async () => {
+    const claude = PLATFORMS.find((platform) => platform.id === 'claude')!;
+    await installManagedCometSkills(tmpDir);
+    await installEnterpriseGuard(tmpDir, claude, 'project');
+
+    const before = await collectDoctorResults(tmpDir);
+    const beforeCheck = before.find(
+      (result) => result.check === 'enterprise gateway: Claude Code (project)',
+    );
+    expect(beforeCheck).toMatchObject({
+      status: 'warn',
+      message: expect.stringContaining('outdated Enterprise Gateway runtime'),
+    });
+    expect(beforeCheck?.message).toContain('comet doctor --repair --scope project');
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
@@ -1468,20 +1672,40 @@ describe('doctor command', () => {
       'skills',
       'comet',
       'scripts',
-      'comet-hook-router.mjs',
+      'comet-enterprise-gateway.mjs',
     );
     await expect(fs.readFile(installed)).resolves.toEqual(
       await fs.readFile(
-        path.resolve('assets', 'skills', 'comet', 'scripts', 'comet-hook-router.mjs'),
+        path.resolve('assets', 'skills', 'comet', 'scripts', 'comet-enterprise-gateway.mjs'),
       ),
     );
     const after = await collectDoctorResults(tmpDir);
     expect(
-      after.find((result) => result.check === 'hook runtime: Claude Code (project)'),
-    ).toMatchObject({ status: 'pass', message: 'current' });
-    expect(
-      after.find((result) => result.check === 'enterprise guard: Claude Code (project)'),
-    ).toMatchObject({ status: 'pass' });
+      after.find((result) => result.check === 'enterprise gateway: Claude Code (project)'),
+    ).toMatchObject({
+      status: 'pass',
+      message: 'exactly one managed Enterprise Gateway present',
+    });
+  });
+
+  it('reports a missing Enterprise Gateway runtime file as missing without crashing', async () => {
+    const claude = PLATFORMS.find((platform) => platform.id === 'claude')!;
+    await installManagedCometSkills(tmpDir);
+    await installEnterpriseGuard(tmpDir, claude, 'project');
+    await fs.rm(
+      path.join(tmpDir, '.claude', 'skills', 'comet', 'scripts', 'comet-enterprise-gateway.mjs'),
+    );
+
+    const results = await collectDoctorResults(tmpDir);
+
+    const gatewayCheck = results.find(
+      (result) => result.check === 'enterprise gateway: Claude Code (project)',
+    );
+    expect(gatewayCheck).toMatchObject({
+      status: 'warn',
+      message: expect.stringContaining('managed Enterprise Gateway missing'),
+    });
+    expect(gatewayCheck?.message).toContain('comet doctor --repair --scope project');
   });
 
   it('uses the Classic-only project language when repairing managed Rules', async () => {
@@ -1559,18 +1783,16 @@ describe('doctor command', () => {
       log.mockRestore();
     }
 
-    const repaired = JSON.parse(await fs.readFile(hookPath, 'utf8'));
-    const hooks = repaired.hooks.PreToolUse.flatMap(
-      (group: { hooks: Array<{ command?: string; args?: unknown }> }) => group.hooks,
-    );
-    const includesScript = (hook: { command?: string; args?: unknown }, scriptName: string) =>
-      hook.command?.includes(scriptName) ||
-      (Array.isArray(hook.args) &&
-        hook.args.some(
-          (arg): arg is string => typeof arg === 'string' && arg.includes(scriptName),
-        ));
-    expect(hooks.filter((hook) => includesScript(hook, 'comet-hook-router.mjs'))).toHaveLength(1);
-    expect(hooks.some((hook) => includesScript(hook, 'comet-hook-guard.mjs'))).toBe(false);
+    const repaired = JSON.parse(await fs.readFile(hookPath, 'utf8')) as {
+      hooks: { PreToolUse: Array<{ hooks: DoctorHook[] }> };
+    };
+    const hooks = readDoctorHooks(repaired);
+    expect(
+      hooks.filter((hook) => hookIncludesScript(hook, 'comet-enterprise-gateway.mjs')),
+    ).toHaveLength(1);
+    expect(hooks.some((hook) => hookIncludesScript(hook, 'comet-hook-router.mjs'))).toBe(false);
+    expect(hooks.some((hook) => hookIncludesScript(hook, 'comet-enterprise-hook.mjs'))).toBe(false);
+    expect(hooks.some((hook) => hookIncludesScript(hook, 'comet-hook-guard.mjs'))).toBe(false);
     expect(hooks).toContainEqual({ type: 'command', command: 'node user-hook.mjs' });
     await expect(fs.access(legacyRule)).rejects.toMatchObject({ code: 'ENOENT' });
   });
@@ -1685,12 +1907,12 @@ describe('doctor command', () => {
 
     const results = await collectDoctorResults(tmpDir);
 
-    expect(results.find((result) => result.check === 'hooks: Claude Code (project)')).toMatchObject(
-      {
-        status: 'warn',
-        message: expect.stringContaining('Invalid Hook JSON'),
-      },
-    );
+    expect(
+      results.find((result) => result.check === 'enterprise gateway: Claude Code (project)'),
+    ).toMatchObject({
+      status: 'warn',
+      message: expect.stringContaining('Invalid Hook JSON'),
+    });
     expect(await fs.readFile(hookPath, 'utf8')).toBe(malformed);
   });
 

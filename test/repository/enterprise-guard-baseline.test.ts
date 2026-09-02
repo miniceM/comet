@@ -129,11 +129,12 @@ describe('enterprise guard design baseline', () => {
     expect(matrix).toContain('CI 兜底');
     expect(matrix).toContain('install / update / doctor / uninstall');
     expect(coverageReport).toContain('Claude Code');
-    expect(coverageReport).toContain('强制阻断（项目级）');
+    expect(coverageReport).toContain('尽力阻断（本地 Gateway）');
     expect(coverageReport).toContain('Write、Edit、Bash');
     expect(coverageReport).toContain('规则注入 + CI 兜底');
     expect(coverageReport).toContain('不抵御能够修改本地 Hook、配置或脚本的恶意主体');
-    expect(matrix).toContain('Claude Code 已完成可重复项目级 Spike');
+    expect(matrix).toContain('Claude Code 已完成 Gateway 生命周期 Spike');
+    expect(matrix).toContain('同级 Hook 并行执行');
     expect(matrix).toContain('其他平台仍不属于强制阻断覆盖');
   });
 });

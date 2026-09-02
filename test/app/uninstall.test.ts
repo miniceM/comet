@@ -41,6 +41,10 @@ import {
   installCometHooksForPlatform,
 } from '../../domains/skill/platform-install.js';
 import { installCometProjectInstructions } from '../../domains/skill/project-instructions.js';
+import {
+  installEnterpriseGuard,
+  removeEnterpriseGuard,
+} from '../../domains/enterprise-guard/hook-lifecycle.js';
 import { fileExists, removeFile, removeDir, isDirEmpty } from '../../platform/fs/file-system.js';
 import {
   getProjectRegistryPath,
@@ -1109,6 +1113,97 @@ describe('uninstall', () => {
       const updatedContent = await fs.readFile(settingsPath, 'utf-8');
       const updated = JSON.parse(updatedContent);
       expect(updated.hooks.PreToolUse).toEqual([{ matcher: 'Write|Edit', hooks: [] }]);
+    });
+  });
+
+  describe('removeEnterpriseGuard', () => {
+    it('removes the Enterprise Gateway and the retired Enterprise Hook while preserving user hooks', async () => {
+      const claudePlatform: Platform = PLATFORMS.find((p) => p.id === 'claude')!;
+      const settingsDir = path.join(tmpDir, '.claude');
+      await fs.mkdir(settingsDir, { recursive: true });
+      const settingsPath = path.join(settingsDir, 'settings.local.json');
+      const settings = {
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: 'Write|Edit',
+              hooks: [{ type: 'command', command: 'node user-hook.mjs' }],
+            },
+          ],
+        },
+      };
+      await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+
+      await installEnterpriseGuard(tmpDir, claudePlatform, 'project');
+      const withRetiredHook = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+      withRetiredHook.hooks.PreToolUse.push({
+        matcher: 'Write|Edit|Bash',
+        hooks: [
+          {
+            type: 'command',
+            command:
+              'node .claude/skills/comet/scripts/comet-enterprise-hook.mjs --platform claude',
+          },
+        ],
+      });
+      await fs.writeFile(settingsPath, JSON.stringify(withRetiredHook, null, 2), 'utf-8');
+
+      const result = await removeEnterpriseGuard(tmpDir, claudePlatform, 'project');
+      expect(result.removed).toBe(2);
+      expect(result.failed).toBe(0);
+
+      const updated = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+      const commands = updated.hooks.PreToolUse.flatMap(
+        (group: { hooks: Array<{ command: string }> }) =>
+          group.hooks.map((hook: { command: string }) => hook.command),
+      );
+      expect(
+        commands.some((command: string) => command.includes('comet-enterprise-gateway.mjs')),
+      ).toBe(false);
+      expect(
+        commands.some((command: string) => command.includes('comet-enterprise-hook.mjs')),
+      ).toBe(false);
+      expect(commands).toContain('node user-hook.mjs');
+    });
+
+    it('removes the Router during a full Comet uninstall without deleting user hooks', async () => {
+      const claudePlatform: Platform = PLATFORMS.find((p) => p.id === 'claude')!;
+      const settingsDir = path.join(tmpDir, '.claude');
+      await fs.mkdir(settingsDir, { recursive: true });
+      const settingsPath = path.join(settingsDir, 'settings.local.json');
+      const settings = {
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: 'Write|Edit',
+              hooks: [{ type: 'command', command: 'node user-hook.mjs' }],
+            },
+          ],
+        },
+      };
+      await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+
+      await installCometHooksForPlatform(tmpDir, claudePlatform, 'project');
+      await installEnterpriseGuard(tmpDir, claudePlatform, 'project');
+
+      await removeCometHooksForPlatform(tmpDir, claudePlatform, 'project');
+      await removeEnterpriseGuard(tmpDir, claudePlatform, 'project');
+
+      const updated = JSON.parse(await fs.readFile(settingsPath, 'utf-8'));
+      const commands = updated.hooks.PreToolUse.flatMap(
+        (group: { hooks: Array<{ command: string }> }) =>
+          group.hooks.map((hook: { command: string }) => hook.command),
+      );
+      expect(commands.some((command: string) => command.includes('comet-hook-router.mjs'))).toBe(
+        false,
+      );
+      expect(
+        commands.some((command: string) => command.includes('comet-enterprise-gateway.mjs')),
+      ).toBe(false);
+      expect(
+        commands.some((command: string) => command.includes('comet-enterprise-hook.mjs')),
+      ).toBe(false);
+      expect(commands).toContain('node user-hook.mjs');
     });
   });
 
