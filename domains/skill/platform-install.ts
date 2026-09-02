@@ -376,7 +376,7 @@ description: Run the {skillName} Comet workflow
 const PI_COMMAND_EXTENSION_FILE = 'comet-commands.ts';
 const OPENCODE_STYLE_PLATFORM_IDS = new Set(['opencode', 'mimocode']);
 
-function getAssetsDir(): string {
+export function getAssetsDir(): string {
   const directAssets = path.resolve(__dirname, '..', '..', 'assets');
   if (existsSync(path.join(directAssets, 'manifest.json'))) {
     return directAssets;
@@ -2398,7 +2398,6 @@ export {
   getManifestSkills,
   getUserFacingSkillNames,
   createWorkingDirs,
-  getAssetsDir,
   computeRuleDestPath,
   formatRuleContent,
   isManagedHookCommand,

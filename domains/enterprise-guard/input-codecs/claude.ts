@@ -1,68 +1,14 @@
+import { MAX_ENTERPRISE_HOOK_INPUT_BYTES } from '../normalized-event.js';
+import { isWriteTool } from '../normalized-event.js';
+import type { EnterpriseGuardInputCodec, EnterpriseHookInput } from '../normalized-event.js';
 import {
-  MAX_ENTERPRISE_HOOK_FIELD_BYTES,
-  MAX_ENTERPRISE_HOOK_INPUT_BYTES,
-  isWriteTool,
-} from '../normalized-event.js';
-import type {
-  CapturedJson,
-  CapturedString,
-  EnterpriseGuardInputCodec,
-  EnterpriseHookInput,
-} from '../normalized-event.js';
-
-type JsonRecord = Record<string, unknown>;
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function boundedString(value: unknown, maxBytes = MAX_ENTERPRISE_HOOK_FIELD_BYTES): CapturedString {
-  if (typeof value !== 'string') {
-    return { value: null, capturedBytes: 0, originalBytes: 0, truncated: false };
-  }
-  const bytes = Buffer.from(value, 'utf8');
-  const captured = bytes.subarray(0, maxBytes);
-  return {
-    value: captured.toString('utf8'),
-    capturedBytes: captured.length,
-    originalBytes: bytes.length,
-    truncated: bytes.length > maxBytes,
-  };
-}
-
-function boundedJson(value: unknown): CapturedJson {
-  const serialized = JSON.stringify(value ?? null);
-  const captured = boundedString(serialized);
-  return {
-    value: captured.truncated ? null : (value ?? null),
-    capturedBytes: captured.capturedBytes,
-    originalBytes: captured.originalBytes,
-    truncated: captured.truncated,
-  };
-}
-
-function truncationField(fieldPath: string, value: CapturedString | CapturedJson) {
-  return {
-    path: fieldPath,
-    capturedBytes: value.capturedBytes,
-    originalBytes: value.originalBytes,
-    truncated: value.truncated,
-  };
-}
-
-function rawInput(source: string): { source: string; field: ReturnType<typeof truncationField> } {
-  const bytes = Buffer.from(source, 'utf8');
-  const captured = bytes.subarray(0, MAX_ENTERPRISE_HOOK_INPUT_BYTES);
-  return {
-    source: captured.toString('utf8'),
-    field: {
-      path: 'raw',
-      capturedBytes: captured.length,
-      originalBytes: bytes.length,
-      truncated: bytes.length > MAX_ENTERPRISE_HOOK_INPUT_BYTES,
-    },
-  };
-}
+  boundedJson,
+  boundedString,
+  capturedRawInput,
+  isRecord,
+  truncationField,
+  type JsonRecord,
+} from './shared.js';
 
 function writeOperation(
   toolName: string | null,
@@ -74,7 +20,7 @@ function writeOperation(
 
 /** Convert Claude Code raw PreToolUse stdin into the versioned EnterpriseHookInput v1 contract. */
 export function parseClaudeEnterpriseHookInput(source: string): EnterpriseHookInput {
-  const raw = rawInput(source);
+  const raw = capturedRawInput(source);
   const fields = [raw.field];
   let parsed: JsonRecord = {};
   let parse: EnterpriseHookInput['parse'] = { status: 'complete', errors: [] };

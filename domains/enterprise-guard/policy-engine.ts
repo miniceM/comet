@@ -327,6 +327,18 @@ export function evaluateEnterpriseHookInput(
     return aggregate([inputFailure(input)]);
   }
   if (isBashTool(toolName) && !input.command.value) return aggregate([inputFailure(input)]);
+  if (input.writes.length > 0 && !isWriteTool(toolName)) {
+    return aggregate([
+      result(
+        input,
+        'EG-HARD-INPUT-001',
+        'hard',
+        'deny',
+        'Unknown mutating tool cannot be verified',
+        [{ kind: 'policy', subject: 'unknown-mutating-tool', redacted: true }],
+      ),
+    ]);
+  }
 
   const results: EnterpriseRuleResult[] = [];
   const write = input.writes[0];

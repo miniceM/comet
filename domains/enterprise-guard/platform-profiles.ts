@@ -32,11 +32,11 @@ const CLAUDE_PROFILE: EnterpriseGuardPlatformProfile = {
 const OPENCODE_PROFILE: EnterpriseGuardPlatformProfile = {
   platformId: 'opencode',
   host: 'plugin-hook',
-  inputCodec: null,
-  decisionCodec: null,
-  installStrategy: 'not-installed',
-  enforcement: 'none',
-  coveredTools: [],
+  inputCodec: 'opencode',
+  decisionCodec: 'opencode-plugin',
+  installStrategy: 'managed-plugin',
+  enforcement: 'best-effort',
+  coveredTools: ['bash'],
   orderingGuarantee: 'unknown',
 };
 

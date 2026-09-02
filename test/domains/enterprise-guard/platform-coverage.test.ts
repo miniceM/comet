@@ -5,6 +5,7 @@ import {
   enterpriseGuardCoverage,
   isEnterpriseGuardEnforcedPlatform,
   usesEnterpriseGuardGateway,
+  usesEnterpriseGuardPlugin,
 } from '../../../domains/enterprise-guard/platform-coverage.js';
 import { PLATFORMS } from '../../../platform/install/platforms.js';
 
@@ -54,10 +55,21 @@ describe('Enterprise Guard platform coverage', () => {
     });
     expect(enterpriseGuardPlatformProfile({ id: 'opencode' })).toMatchObject({
       host: 'plugin-hook',
-      installStrategy: 'not-installed',
-      enforcement: 'none',
+      inputCodec: 'opencode',
+      decisionCodec: 'opencode-plugin',
+      installStrategy: 'managed-plugin',
+      enforcement: 'best-effort',
+      coveredTools: ['bash'],
       orderingGuarantee: 'unknown',
     });
-    expect(enterpriseGuardCoverage({ id: 'opencode' }).level).toBe('rules-and-ci');
+    expect(enterpriseGuardCoverage({ id: 'opencode' })).toMatchObject({
+      level: 'best-effort',
+      installationScope: 'project or user-local',
+      enforcedTools: ['bash'],
+      fallback:
+        'local managed plugin + rules injection + CI fallback; plugin ordering is not final',
+    });
+    expect(isEnterpriseGuardEnforcedPlatform({ id: 'opencode' })).toBe(false);
+    expect(usesEnterpriseGuardPlugin({ id: 'opencode' })).toBe(true);
   });
 });

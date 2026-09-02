@@ -34,17 +34,20 @@ export function enterpriseGuardCoverage(platform: Pick<Platform, 'id'>): Enterpr
   const profile = enterpriseGuardPlatformProfile(platform);
   const level = LEVEL_BY_ENFORCEMENT[profile.enforcement];
   const enforced = VERIFIED_ENFORCEMENT[profile.enforcement];
-  const gatewayInstalled = profile.installStrategy === 'composite-gateway';
+  const gatewayInstalled =
+    profile.installStrategy === 'composite-gateway' || profile.installStrategy === 'managed-plugin';
   return {
     level,
     installationScope: enforced || gatewayInstalled ? 'project or user-local' : 'rules only',
     enforcedTools: profile.coveredTools,
     fallback:
-      profile.enforcement === 'best-effort' && gatewayInstalled
+      profile.enforcement === 'best-effort' && profile.installStrategy === 'composite-gateway'
         ? 'local Gateway + rules injection + CI fallback; peer Hook ordering is not final'
-        : enforced
-          ? 'remote CI remains required against local tampering'
-          : 'rules injection + CI fallback',
+        : profile.enforcement === 'best-effort' && gatewayInstalled
+          ? 'local managed plugin + rules injection + CI fallback; plugin ordering is not final'
+          : enforced
+            ? 'remote CI remains required against local tampering'
+            : 'rules injection + CI fallback',
   };
 }
 
@@ -54,4 +57,8 @@ export function isEnterpriseGuardEnforcedPlatform(platform: Pick<Platform, 'id'>
 
 export function usesEnterpriseGuardGateway(platform: Pick<Platform, 'id'>): boolean {
   return enterpriseGuardPlatformProfile(platform).installStrategy === 'composite-gateway';
+}
+
+export function usesEnterpriseGuardPlugin(platform: Pick<Platform, 'id'>): boolean {
+  return enterpriseGuardPlatformProfile(platform).installStrategy === 'managed-plugin';
 }

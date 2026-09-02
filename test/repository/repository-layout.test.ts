@@ -56,8 +56,16 @@ describe('repository layout registry', () => {
       path.resolve('assets', 'skills', 'comet', 'scripts', 'comet-entry-runtime.mjs'),
     );
     expect(layout.enterpriseGuardRuntime).toEqual({
-      entry: 'domains/enterprise-guard/enterprise-gateway-entry.ts',
-      output: 'assets/skills/comet/scripts/comet-enterprise-gateway.mjs',
+      entries: {
+        gateway: 'domains/enterprise-guard/enterprise-gateway-entry.ts',
+        runner: 'domains/enterprise-guard/enterprise-runner-entry.ts',
+        opencodePlugin: 'domains/enterprise-guard/opencode-plugin-entry.ts',
+      },
+      outputs: {
+        gateway: 'assets/skills/comet/scripts/comet-enterprise-gateway.mjs',
+        runner: 'assets/skills/comet/scripts/comet-enterprise-runner.mjs',
+        opencodePlugin: 'assets/skills/comet/plugins/comet-enterprise-guard.mjs',
+      },
     });
   });
 

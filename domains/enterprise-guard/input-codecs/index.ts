@@ -1,7 +1,12 @@
 import type { EnterpriseHookInput } from '../normalized-event.js';
 import { claudeEnterpriseGuardCodec } from './claude.js';
 
-const CODECS = new Map([[claudeEnterpriseGuardCodec.id, claudeEnterpriseGuardCodec]]);
+import { opencodeEnterpriseGuardCodec } from './opencode.js';
+
+const CODECS = new Map([
+  [claudeEnterpriseGuardCodec.id, claudeEnterpriseGuardCodec],
+  [opencodeEnterpriseGuardCodec.id, opencodeEnterpriseGuardCodec],
+]);
 
 export function hasEnterpriseGuardInputCodec(platformId: string): boolean {
   return CODECS.has(platformId);

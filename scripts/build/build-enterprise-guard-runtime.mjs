@@ -7,14 +7,25 @@ import { readRepositoryLayout, resolveRepositoryPath } from '../lib/repository-l
 
 const layout = readRepositoryLayout();
 const repoRoot = resolveRepositoryPath('.');
-const entry = layout.enterpriseGuardRuntime?.entry;
-const output = layout.enterpriseGuardRuntime?.output;
+const entries = layout.enterpriseGuardRuntime?.entries;
+const outputs = layout.enterpriseGuardRuntime?.outputs;
 
-if (!entry || !output) {
-  throw new Error('Enterprise Guard runtime requires entry and output in repository layout');
+if (!entries || !outputs) {
+  throw new Error('Enterprise Guard runtime requires entries and outputs in repository layout');
 }
 
-async function bundledRuntime() {
+const entryNames = Object.keys(entries).sort();
+const outputNames = Object.keys(outputs).sort();
+if (
+  entryNames.length !== outputNames.length ||
+  entryNames.some((name, index) => name !== outputNames[index])
+) {
+  throw new Error('Enterprise Guard runtime entries and outputs must use the same keys');
+}
+
+const executableOutputs = new Set(['gateway', 'runner']);
+
+async function bundledRuntime(entry) {
   const result = await build({
     absWorkingDir: repoRoot,
     entryPoints: [entry],
@@ -30,13 +41,6 @@ async function bundledRuntime() {
     charset: 'utf8',
     treeShaking: true,
     minify: true,
-    banner: {
-      js: [
-        '#!/usr/bin/env node',
-        "import { createRequire as __cometCreateRequire } from 'module';",
-        'const require = __cometCreateRequire(import.meta.url);',
-      ].join('\n'),
-    },
   });
   if (result.outputFiles.length !== 1) {
     throw new Error(
@@ -46,28 +50,58 @@ async function bundledRuntime() {
   return Buffer.from(result.outputFiles[0].contents);
 }
 
-const outputFile = resolveRepositoryPath(output);
-const expected = await bundledRuntime();
+async function bundledRuntimeArtifacts() {
+  const artifacts = new Map();
+  for (const [name, entry] of Object.entries(entries)) {
+    const output = outputs[name];
+    let expected = await bundledRuntime(entry);
+    if (executableOutputs.has(name)) {
+      expected = Buffer.concat([
+        Buffer.from(
+          [
+            '#!/usr/bin/env node',
+            "import { createRequire as __cometCreateRequire } from 'module';",
+            'const require = __cometCreateRequire(import.meta.url);',
+            '',
+          ].join('\n'),
+          'utf8',
+        ),
+        expected,
+      ]);
+    }
+    artifacts.set(name, { output, expected });
+  }
+  return artifacts;
+}
+
+const artifacts = await bundledRuntimeArtifacts();
 
 if (process.argv.includes('--check')) {
-  let actual;
-  try {
-    actual = await fs.readFile(outputFile);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      console.error(`Enterprise Guard runtime script is missing: ${output}`);
+  for (const { output, expected } of artifacts.values()) {
+    const outputFile = resolveRepositoryPath(output);
+    let actual;
+    try {
+      actual = await fs.readFile(outputFile);
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        console.error(`Enterprise Guard runtime script is missing: ${output}`);
+        process.exitCode = 1;
+        continue;
+      } else {
+        throw error;
+      }
+    }
+    if (actual && !actual.equals(expected)) {
+      console.error(
+        `Enterprise Guard runtime script is stale: ${output}; run node scripts/build/build-enterprise-guard-runtime.mjs`,
+      );
       process.exitCode = 1;
-    } else {
-      throw error;
     }
   }
-  if (actual && !actual.equals(expected)) {
-    console.error(
-      `Enterprise Guard runtime script is stale: ${output}; run node scripts/build/build-enterprise-guard-runtime.mjs`,
-    );
-    process.exitCode = 1;
-  }
 } else {
-  await fs.mkdir(path.dirname(outputFile), { recursive: true });
-  await fs.writeFile(outputFile, expected);
+  for (const { output, expected } of artifacts.values()) {
+    const outputFile = resolveRepositoryPath(output);
+    await fs.mkdir(path.dirname(outputFile), { recursive: true });
+    await fs.writeFile(outputFile, expected);
+  }
 }

@@ -2,10 +2,11 @@
 
 All notable changes to @rpamis/comet will be documented in this file.
 
-## What's Changed [0.4.0-rc.2] - 2026-09-01
+## What's Changed [0.4.0-rc.2] - 2026-09-02
 
 ### Added
 
+- **Enterprise Guard for OpenCode**: `comet init` and `comet update` now install an auto-discovered managed OpenCode plugin bridge and Runner. Bash commands are evaluated before execution to block high-risk operations such as embedded credentials or private keys, filesystem-root recursive deletion, and force-push commands. `comet doctor --repair` restores missing or outdated managed files, while uninstall removes only Comet-owned files and preserves user plugins and configuration.
 - **Enterprise Guard for Claude Code**: `comet init` and `comet update` now install one managed `PreToolUse` Gateway that evaluates high-risk writes, embedded credentials or private keys, filesystem-root recursive deletion, and force-push commands before Comet workflow routing. Guard evaluation and required audit persistence fail closed, `comet doctor --repair` restores missing project or user-local runtimes before retiring legacy Hooks, uninstall preserves user entries, and coverage reports peer-Hook ordering limits as best-effort with CI fallback.
 - **Enterprise Guard audit integrity**: Guard findings are now redacted, append safely under concurrent Hooks, and expose a schema-validated reader for review and CI consumers; corruption or a recorded hard denial blocks review.
 
