@@ -9,39 +9,25 @@ import {
 import { PLATFORMS } from '../../../platform/install/platforms.js';
 
 describe('Enterprise Guard platform coverage', () => {
-  const GATEWAY_PLATFORM_IDS = new Set([
-    'claude',
-    'codex',
-    'amazon-q',
-    'qwen',
-    'gemini',
-    'github-copilot',
-    'trae',
-    'trae-cn',
-    'oh-my-pi',
-    'dsh',
-  ]);
+  it('installs the Claude Gateway without overstating peer-Hook ordering guarantees', () => {
+    const claude = PLATFORMS.find((platform) => platform.id === 'claude');
+    expect(claude).toBeDefined();
 
-  it('installs the composite Gateway for verified command-hook platforms without overstating peer-Hook guarantees', () => {
-    const gatewayPlatforms = PLATFORMS.filter((platform) => GATEWAY_PLATFORM_IDS.has(platform.id));
-    expect(gatewayPlatforms.length).toBe(GATEWAY_PLATFORM_IDS.size);
-
-    for (const platform of gatewayPlatforms) {
-      const coverage = enterpriseGuardCoverage(platform);
-      expect(coverage.level).toBe('best-effort');
-      expect(coverage.installationScope).toBe('project or user-local');
-      expect(coverage.enforcedTools.length).toBeGreaterThan(0);
-      expect(coverage.fallback).toContain('local Gateway + rules injection + CI fallback');
-      expect(isEnterpriseGuardEnforcedPlatform(platform)).toBe(false);
-      expect(usesEnterpriseGuardGateway(platform)).toBe(true);
-    }
+    expect(enterpriseGuardCoverage(claude!)).toMatchObject({
+      level: 'best-effort',
+      installationScope: 'project or user-local',
+      enforcedTools: ['Write', 'Edit', 'Bash'],
+      fallback: 'local Gateway + rules injection + CI fallback; peer Hook ordering is not final',
+    });
+    expect(isEnterpriseGuardEnforcedPlatform(claude!)).toBe(false);
+    expect(usesEnterpriseGuardGateway(claude!)).toBe(true);
   });
 
-  it('labels uninstrumented or unverified platforms as rules injection and CI fallback', () => {
+  it('labels every other Hook platform as rules injection and CI fallback', () => {
     const fallbackPlatforms = PLATFORMS.filter(
-      (platform) => !GATEWAY_PLATFORM_IDS.has(platform.id),
+      (platform) => platform.supportsHooks && platform.id !== 'claude',
     );
-    expect(fallbackPlatforms.length).toBeGreaterThan(0);
+    expect(fallbackPlatforms).not.toHaveLength(0);
 
     for (const platform of fallbackPlatforms) {
       expect(enterpriseGuardCoverage(platform)).toMatchObject({
@@ -55,7 +41,7 @@ describe('Enterprise Guard platform coverage', () => {
     }
   });
 
-  it('separates host capability from verified enforcement across platform profiles', () => {
+  it('separates host capability and registered input codec from verified enforcement', () => {
     expect(enterpriseGuardPlatformProfile({ id: 'claude' })).toEqual({
       platformId: 'claude',
       host: 'command-hook',
@@ -72,8 +58,8 @@ describe('Enterprise Guard platform coverage', () => {
       host: 'command-hook',
       inputCodec: 'qwen',
       decisionCodec: 'comet-command-hook',
-      installStrategy: 'composite-gateway',
-      enforcement: 'best-effort',
+      installStrategy: 'not-installed',
+      enforcement: 'none',
       coveredTools: ['write_file', 'edit_file', 'execute_command', 'Write', 'Edit', 'Bash'],
       orderingGuarantee: 'unknown',
     });
@@ -83,8 +69,8 @@ describe('Enterprise Guard platform coverage', () => {
       host: 'command-hook',
       inputCodec: 'gemini',
       decisionCodec: 'comet-command-hook',
-      installStrategy: 'composite-gateway',
-      enforcement: 'best-effort',
+      installStrategy: 'not-installed',
+      enforcement: 'none',
       coveredTools: ['WriteFile', 'EditFile', 'Shell'],
       orderingGuarantee: 'unknown',
     });
@@ -94,8 +80,8 @@ describe('Enterprise Guard platform coverage', () => {
       host: 'command-hook',
       inputCodec: 'copilot',
       decisionCodec: 'copilot-json',
-      installStrategy: 'composite-gateway',
-      enforcement: 'best-effort',
+      installStrategy: 'not-installed',
+      enforcement: 'none',
       coveredTools: ['editFiles', 'runCommand', 'applyPatch'],
       orderingGuarantee: 'unknown',
     });
