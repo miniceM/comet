@@ -10,7 +10,7 @@ import {
   type HookInspectionResult,
 } from '../skill/platform-inspect.js';
 import { removeManagedHooksForPlatform, type RemovalResult } from '../skill/uninstall.js';
-import { enterpriseGuardCoverage, isEnterpriseGuardEnforcedPlatform } from './platform-coverage.js';
+import { enterpriseGuardCoverage, usesEnterpriseGuardGateway } from './platform-coverage.js';
 
 export const hookLifecycleDependencies = {
   installManagedHooksForPlatform,
@@ -47,7 +47,7 @@ const RETIRED_MANAGED_HOOK_CONFIGS: Record<string, HookConfig> = {
 };
 
 function supportsEnterpriseGuard(platform: Platform): boolean {
-  return platform.hookFormat === 'claude-code' && isEnterpriseGuardEnforcedPlatform(platform);
+  return platform.hookFormat === 'claude-code' && usesEnterpriseGuardGateway(platform);
 }
 
 function unsupportedPlatformReason(platform: Platform): string {

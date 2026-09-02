@@ -237,9 +237,9 @@ it('separates host capability from verified enforcement', () => {
     inputCodec: 'claude',
     decisionCodec: 'comet-command-hook',
     installStrategy: 'composite-gateway',
-    enforcement: 'project',
+    enforcement: 'best-effort',
     coveredTools: ['Write', 'Edit', 'Bash'],
-    orderingGuarantee: 'final',
+    orderingGuarantee: 'unknown',
   });
   expect(enterpriseGuardPlatformProfile({ id: 'opencode' })).toMatchObject({
     host: 'plugin-hook',
@@ -299,7 +299,7 @@ git add domains/enterprise-guard/platform-profiles.ts domains/enterprise-guard/p
 git commit -m "refactor: model enterprise guard platform capabilities"
 ```
 
-预期：PASS；Claude 为 `enforced-project`，OpenCode 和未接入平台为 `rules-and-ci`。
+预期：PASS；Claude 安装本地 Gateway，但因同级 Hook 并行执行而为 `best-effort`；OpenCode 和未接入平台为 `rules-and-ci`。
 
 ## 任务 3：建立平台无关 Guard service
 
@@ -712,10 +712,10 @@ function enterpriseGatewayRuntimePaths(
 }
 ```
 
-在 `checkHookComponents` 读取 coverage 后先处理 `enforced-project`。并行读取 Gateway source/destination，只有内容相同且 Hook inspection 健康时才通过：
+在 `checkHookComponents` 读取 profile 后先处理 `composite-gateway` 安装策略。并行读取 Gateway source/destination，只有内容相同且 Hook inspection 健康时才通过：
 
 ```ts
-if (enterpriseCoverage.level === 'enforced-project') {
+if (usesEnterpriseGuardGateway(platform)) {
   const runtime = enterpriseGatewayRuntimePaths(baseDir, platform, scope);
   const [expected, installed] = await Promise.all([
     fs.readFile(runtime.source),
@@ -787,7 +787,7 @@ git log "$(git describe --tags --abbrev=0)"..HEAD --oneline
 
 - Claude 使用单一 `comet-enterprise-gateway.mjs`，覆盖 `Write`、`Edit`、`Bash`。
 - Guard 在项目发现和 Router 之前执行。
-- 项目级配置可被本地操作者移除，因此等级仍为 `enforced-project`。
+- Gateway 内部保证 Guard 先于 Router，但同级 Hook 并行且互相不可见，因此等级为 `best-effort`。
 - OpenCode 仅登记 `plugin-hook` 宿主能力，插件未安装，等级仍为 `rules-and-ci`。
 - 其他平台不因内部抽象升级而自动宣称强制阻断。
 
@@ -798,7 +798,7 @@ git log "$(git describe --tags --abbrev=0)"..HEAD --oneline
 ```markdown
 ### Changed
 
-- **Enterprise Guard gateway**: Claude Code now evaluates enterprise hard rules and Comet workflow routing through one ordered local hook, so hard-rule enforcement runs before project discovery without relying on multi-hook ordering.
+- **Enterprise Guard gateway**: Claude Code now evaluates enterprise hard rules before Comet workflow routing within one local Gateway, fails closed when Guard evaluation or required audit persistence is unavailable, and reports peer-Hook ordering limits as best-effort with CI fallback.
 ```
 
 若该版本已有 `### Changed`，追加到现有分组。根 README 不因内部架构调整而修改。

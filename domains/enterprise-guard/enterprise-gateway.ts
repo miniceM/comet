@@ -15,6 +15,7 @@ import { projectRootFrom } from '../comet-entry/hook-project-root.js';
 import { runWithHookReadCache } from '../../platform/process/hook-read-cache.js';
 import type { GuardServiceRequest } from './guard-service.js';
 import { evaluateEnterpriseGuardSource } from './guard-service.js';
+import { hasEnterpriseGuardInputCodec } from './input-codecs/index.js';
 import type { EnterpriseGuardEvaluation } from './normalized-event.js';
 
 const USAGE =
@@ -55,6 +56,9 @@ function parseGatewayArgs(args: readonly string[]): ParsedGatewayArgs {
   if (!COMET_HOOK_PLATFORM_IDS.has(platformId)) {
     throw new Error(`unsupported Hook platform: ${platformId}`);
   }
+  if (!hasEnterpriseGuardInputCodec(platformId)) {
+    throw new Error(`Enterprise Guard input codec is unavailable for platform: ${platformId}`);
+  }
   if (projectRoot?.startsWith('--')) throw new Error('--project-root requires a value');
   return { platformId, ...(projectRoot ? { projectRoot: path.resolve(projectRoot) } : {}) };
 }
@@ -83,12 +87,11 @@ export async function executeEnterpriseGateway(
       source,
       projectRoot: parsed.projectRoot ?? null,
     });
-  } catch (error) {
-    return {
-      exitCode: 64,
-      stdout: '',
-      stderr: `${error instanceof Error ? error.message : String(error)}\n${USAGE}\n`,
-    };
+  } catch {
+    return renderCometHookDecision(parsed.platformId, {
+      allowed: false,
+      reason: 'Enterprise Guard failed closed: internal evaluation unavailable',
+    });
   }
   if (!guard.decision.allowed) {
     return renderCometHookDecision(parsed.platformId, guard.decision);

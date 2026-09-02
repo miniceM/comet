@@ -37,16 +37,25 @@ export async function evaluateEnterpriseGuardSource(
 
   // Only SOFT warnings trigger audit persistence; pure HARD denials
   // short-circuit without touching the filesystem by design.
-  if (auditRoot && decision.warningRuleIds.length > 0) {
-    try {
-      await dependencies.recordFindings(auditRoot, input, decision);
-    } catch {
+  if (decision.warningRuleIds.length > 0) {
+    if (!auditRoot) {
       decision = {
         ...decision,
         allowed: false,
         ruleId: 'EG-HARD-AUDIT-001',
         reason: 'Enterprise Guard audit persistence is unavailable',
       };
+    } else {
+      try {
+        await dependencies.recordFindings(auditRoot, input, decision);
+      } catch {
+        decision = {
+          ...decision,
+          allowed: false,
+          ruleId: 'EG-HARD-AUDIT-001',
+          reason: 'Enterprise Guard audit persistence is unavailable',
+        };
+      }
     }
   }
   return { input, decision };

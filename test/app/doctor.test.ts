@@ -1563,6 +1563,78 @@ describe('doctor command', () => {
     });
   });
 
+  it('restores a global hook-only Gateway runtime before retiring legacy Hooks', async () => {
+    const hookPath = path.join(tmpDir, '.claude', 'settings.local.json');
+    const skillsRoot = path.join(tmpDir, '.claude', 'skills').replaceAll('\\', '/');
+    await fs.mkdir(path.dirname(hookPath), { recursive: true });
+    await fs.writeFile(
+      hookPath,
+      JSON.stringify({
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: 'Write|Edit',
+              hooks: [
+                {
+                  type: 'command',
+                  command: `node "${skillsRoot}/comet/scripts/comet-hook-router.mjs" --platform "claude"`,
+                },
+                { type: 'command', command: 'node user-hook.mjs' },
+              ],
+            },
+            {
+              matcher: 'Write|Edit|Bash',
+              hooks: [
+                {
+                  type: 'command',
+                  command: `node "${skillsRoot}/comet/scripts/comet-enterprise-hook.mjs" --project-root "${tmpDir.replaceAll('\\', '/')}" --platform "claude"`,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      'utf8',
+    );
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await doctorCommand(tmpDir, { json: true, repair: true, scope: 'global', homeDir: tmpDir });
+    } finally {
+      log.mockRestore();
+    }
+
+    const gatewayRuntime = path.join(
+      tmpDir,
+      '.claude',
+      'skills',
+      'comet',
+      'scripts',
+      'comet-enterprise-gateway.mjs',
+    );
+    await expect(fs.readFile(gatewayRuntime)).resolves.toEqual(
+      await fs.readFile(
+        path.resolve('assets', 'skills', 'comet', 'scripts', 'comet-enterprise-gateway.mjs'),
+      ),
+    );
+
+    const settings = JSON.parse(await fs.readFile(hookPath, 'utf8'));
+    const commands = settings.hooks.PreToolUse.flatMap(
+      (group: { hooks: Array<{ command?: string }> }) =>
+        group.hooks.map((hook: { command?: string }) => hook.command),
+    );
+    expect(
+      commands.filter((command: string) => command?.includes('comet-enterprise-gateway.mjs')),
+    ).toHaveLength(1);
+    expect(commands.some((command: string) => command?.includes('comet-hook-router.mjs'))).toBe(
+      false,
+    );
+    expect(commands.some((command: string) => command?.includes('comet-enterprise-hook.mjs'))).toBe(
+      false,
+    );
+    expect(commands).toContain('node user-hook.mjs');
+  });
+
   it('detects and repairs an outdated Enterprise Gateway runtime', async () => {
     const claude = PLATFORMS.find((platform) => platform.id === 'claude')!;
     await installManagedCometSkills(tmpDir);

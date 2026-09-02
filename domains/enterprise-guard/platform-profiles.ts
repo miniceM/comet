@@ -24,9 +24,9 @@ const CLAUDE_PROFILE: EnterpriseGuardPlatformProfile = {
   inputCodec: 'claude',
   decisionCodec: 'comet-command-hook',
   installStrategy: 'composite-gateway',
-  enforcement: 'project',
+  enforcement: 'best-effort',
   coveredTools: ['Write', 'Edit', 'Bash'],
-  orderingGuarantee: 'final',
+  orderingGuarantee: 'unknown',
 };
 
 const OPENCODE_PROFILE: EnterpriseGuardPlatformProfile = {

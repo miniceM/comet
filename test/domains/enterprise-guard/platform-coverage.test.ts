@@ -4,21 +4,23 @@ import { enterpriseGuardPlatformProfile } from '../../../domains/enterprise-guar
 import {
   enterpriseGuardCoverage,
   isEnterpriseGuardEnforcedPlatform,
+  usesEnterpriseGuardGateway,
 } from '../../../domains/enterprise-guard/platform-coverage.js';
 import { PLATFORMS } from '../../../platform/install/platforms.js';
 
 describe('Enterprise Guard platform coverage', () => {
-  it('marks Claude Code as the only project-level enforced platform', () => {
+  it('installs the Claude Gateway without overstating peer-Hook ordering guarantees', () => {
     const claude = PLATFORMS.find((platform) => platform.id === 'claude');
     expect(claude).toBeDefined();
 
     expect(enterpriseGuardCoverage(claude!)).toMatchObject({
-      level: 'enforced-project',
+      level: 'best-effort',
       installationScope: 'project or user-local',
       enforcedTools: ['Write', 'Edit', 'Bash'],
-      fallback: 'remote CI remains required against local tampering',
+      fallback: 'local Gateway + rules injection + CI fallback; peer Hook ordering is not final',
     });
-    expect(isEnterpriseGuardEnforcedPlatform(claude!)).toBe(true);
+    expect(isEnterpriseGuardEnforcedPlatform(claude!)).toBe(false);
+    expect(usesEnterpriseGuardGateway(claude!)).toBe(true);
   });
 
   it('labels every other Hook platform as rules injection and CI fallback', () => {
@@ -35,6 +37,7 @@ describe('Enterprise Guard platform coverage', () => {
         fallback: 'rules injection + CI fallback',
       });
       expect(isEnterpriseGuardEnforcedPlatform(platform)).toBe(false);
+      expect(usesEnterpriseGuardGateway(platform)).toBe(false);
     }
   });
 
@@ -45,9 +48,9 @@ describe('Enterprise Guard platform coverage', () => {
       inputCodec: 'claude',
       decisionCodec: 'comet-command-hook',
       installStrategy: 'composite-gateway',
-      enforcement: 'project',
+      enforcement: 'best-effort',
       coveredTools: ['Write', 'Edit', 'Bash'],
-      orderingGuarantee: 'final',
+      orderingGuarantee: 'unknown',
     });
     expect(enterpriseGuardPlatformProfile({ id: 'opencode' })).toMatchObject({
       host: 'plugin-hook',

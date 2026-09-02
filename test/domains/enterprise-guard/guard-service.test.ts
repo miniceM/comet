@@ -63,6 +63,28 @@ describe('Enterprise Guard service', () => {
     });
   });
 
+  it('fails closed when SOFT findings have no audit root', async () => {
+    const recordFindings = vi.fn();
+    const result = await evaluateEnterpriseGuardSource(
+      {
+        platformId: 'claude',
+        source: JSON.stringify({
+          tool_name: 'Bash',
+          tool_input: { command: 'git push --force origin feature/demo' },
+        }),
+        projectRoot: null,
+      },
+      { recordFindings },
+    );
+
+    expect(result.decision).toMatchObject({
+      allowed: false,
+      ruleId: 'EG-HARD-AUDIT-001',
+      reason: 'Enterprise Guard audit persistence is unavailable',
+    });
+    expect(recordFindings).not.toHaveBeenCalled();
+  });
+
   it('writes only redacted findings when a HARD deny also emits a SOFT warning', async () => {
     const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'comet-enterprise-guard-'));
     try {

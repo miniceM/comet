@@ -184,4 +184,26 @@ describe('Enterprise Guard composite gateway', () => {
     expect(output.exitCode).toBe(2);
     expect(output.stderr).toContain('Comet Hook Router failed closed during project discovery');
   });
+
+  it('fails closed when Enterprise Guard evaluation rejects', async () => {
+    const inspectRouter = vi.fn();
+    const output = await executeEnterpriseGateway(
+      ['--platform', 'claude'],
+      JSON.stringify({
+        tool_name: 'Write',
+        tool_input: { file_path: 'src/config.ts', content: 'export const port = 3000;' },
+      }),
+      {
+        evaluateGuard: vi.fn().mockRejectedValue(new Error('guard unavailable')),
+        inspectRouter,
+      },
+    );
+
+    expect(output).toEqual({
+      exitCode: 2,
+      stdout: '',
+      stderr: 'Enterprise Guard failed closed: internal evaluation unavailable\n',
+    });
+    expect(inspectRouter).not.toHaveBeenCalled();
+  });
 });

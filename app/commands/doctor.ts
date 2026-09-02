@@ -31,10 +31,7 @@ import {
   inspectEnterpriseGuard,
   installEnterpriseGuard,
 } from '../../domains/enterprise-guard/hook-lifecycle.js';
-import {
-  enterpriseGuardCoverage,
-  isEnterpriseGuardEnforcedPlatform,
-} from '../../domains/enterprise-guard/platform-coverage.js';
+import { usesEnterpriseGuardGateway } from '../../domains/enterprise-guard/platform-coverage.js';
 import {
   getPlatformRuleDestinations,
   getLegacyPlatformRuleDestinations,
@@ -185,7 +182,7 @@ function repairRuntimePathsFor(
   platform: Platform,
   scope: InstallScope,
 ): { source: string; destination: string } {
-  return isEnterpriseGuardEnforcedPlatform(platform)
+  return usesEnterpriseGuardGateway(platform)
     ? enterpriseGatewayRuntimePaths(baseDir, platform, scope)
     : hookRouterRuntimePaths(baseDir, platform, scope);
 }
@@ -798,8 +795,7 @@ async function checkHookComponents(
 ): Promise<CheckResult[]> {
   if (!platform.supportsHooks || !platform.hookFormat) return [];
 
-  const enterpriseCoverage = enterpriseGuardCoverage(platform);
-  if (enterpriseCoverage.level === 'enforced-project') {
+  if (usesEnterpriseGuardGateway(platform)) {
     const gatewayRuntime = enterpriseGatewayRuntimePaths(baseDir, platform, scope);
     let expected: Buffer;
     try {
@@ -1593,7 +1589,7 @@ async function repairDoctorState(
   let projectRouterReady = projectedProjectPlatforms.size > 0;
 
   for (const target of hookOnlyTargets) {
-    if (target.scope === 'project') {
+    if (target.scope === 'project' || usesEnterpriseGuardGateway(target.platform)) {
       const runtime = repairRuntimePathsFor(target.baseDir, target.platform, target.scope);
       await copyFile(runtime.source, runtime.destination);
     }
