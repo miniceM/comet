@@ -322,19 +322,22 @@ async function selectNpmDeps(
   spPlatformIds: string[],
   options: InitOptions,
   lang: string,
-  workflow: CometWorkflow,
+  workflowSelection: InitWorkflowSelection,
 ): Promise<Set<NpmDepId>> {
-  if (workflow === 'native') return new Set();
-
-  const openSpecInstalled = isCommandAvailable('openspec');
-  const openSpecRequired = workflow === 'classic' && !isOpenSpecCliCompatible();
+  const includesClassic = includesWorkflow(workflowSelection, 'classic');
+  const openSpecInstalled = includesClassic && isCommandAvailable('openspec');
+  const openSpecRequired = includesClassic && !isOpenSpecCliCompatible();
   const codegraphInstalled =
     hasCodegraphProjectIndex(projectPath) || resolveCodegraphCommand() !== null;
   const superpowersInstalled = spPlatformIds.length === 0 ? true : undefined;
 
   const states: NpmDepState[] = [
-    { id: 'openspec', installed: openSpecInstalled, required: openSpecRequired },
-    { id: 'superpowers', installed: Boolean(superpowersInstalled) },
+    ...(includesClassic
+      ? [
+          { id: 'openspec' as const, installed: openSpecInstalled, required: openSpecRequired },
+          { id: 'superpowers' as const, installed: Boolean(superpowersInstalled) },
+        ]
+      : []),
     { id: 'codegraph', installed: codegraphInstalled },
   ];
 
@@ -721,7 +724,7 @@ export async function initCommand(
     spPlatformIds,
     options,
     lang,
-    includesWorkflow(workflowSelection, 'classic') ? 'classic' : 'native',
+    workflowSelection,
   );
   const shouldInstallOpenSpecCli = selectedNpmDeps.has('openspec');
   const shouldInstallSuperpowers = selectedNpmDeps.has('superpowers');
@@ -771,21 +774,16 @@ export async function initCommand(
       }`,
     );
     try {
-      osGlobalStatus = await installOpenSpec(
-        projectPath,
-        osToolIds,
-        scope,
-        shouldInstallOpenSpecCli,
+      osGlobalStatus = await installOpenSpec(projectPath, osToolIds, scope, {
+        shouldInstallCli: shouldInstallOpenSpecCli,
         mirrorPlatformIds,
-        scope === 'project' ? workflowDecision?.classicArtifactLayout : 'legacy',
-        assertClassicProjectMutationAllowed,
-        (error) => {
+        artifactLayout: scope === 'project' ? workflowDecision?.classicArtifactLayout : 'legacy',
+        projectMutationGuard: assertClassicProjectMutationAllowed,
+        failureObserver: (error: Error) => {
           osFailureReason = error.message;
         },
-        [],
-        [],
-        selectedPlatformIdsForOs,
-      );
+        selectedPlatformIds: selectedPlatformIdsForOs,
+      });
       if (osGlobalStatus === 'installed' && requiresClassicArtifactRoot) {
         await assertClassicProjectMutationAllowed?.();
         await assertClassicOpenSpecRootHealthy(
@@ -942,6 +940,9 @@ export async function initCommand(
         if (status === 'installed') {
           if (scope === 'project') projectRouterInstalled = true;
           log(`  Comet hooks -> ${platform.name}: ${t(lang, 'hooksInstalled')}`);
+          if (reason) {
+            log(`  Comet hooks -> ${platform.name}: ${reason}`);
+          }
           if (cleanupFailed > 0) {
             cmStatus = 'failed';
             platformFailures.push({

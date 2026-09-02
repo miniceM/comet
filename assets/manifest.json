@@ -1,5 +1,5 @@
 {
-  "version": "0.4.0-beta.23",
+  "version": "0.4.0-rc.2",
   "skills": [
     "comet/SKILL.md",
     "comet/agents/openai.yaml",
@@ -76,7 +76,9 @@
     "comet-hotfix/SKILL.md",
     "comet-hotfix/agents/openai.yaml",
     "comet-tweak/SKILL.md",
-    "comet-tweak/agents/openai.yaml"
+    "comet-tweak/agents/openai.yaml",
+    "comet-memory/SKILL.md",
+    "comet-memory/agents/openai.yaml"
   ],
   "internalSkills": [
     "comet/runtime/classic/skill.yaml",

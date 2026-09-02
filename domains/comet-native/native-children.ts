@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { parseDocument } from 'yaml';
 
-import { listGitWorktreeRoots } from '../../platform/paths/git-worktree.js';
+import { inspectGitWorktree, listGitWorktreeRoots } from '../../platform/paths/git-worktree.js';
 import { runGitCommand } from '../../platform/process/git.js';
 
 import { readNativeBoundedTextFile } from './native-bounded-file.js';
@@ -11,6 +11,12 @@ import { canonicalHash } from './native-canonical-hash.js';
 import { readProjectConfig } from './native-config.js';
 import { nativeProjectPaths } from './native-paths.js';
 import { parseNativePortableState, readNativePortableState } from './native-portable-state.js';
+import {
+  projectNativeSupervisorChildren,
+  readNativeSupervisorState,
+  rebuildNativeSupervisorStateFromFacts,
+  writeNativeSupervisorState,
+} from './native-supervisor.js';
 import type {
   NativePortableAcceptanceState,
   NativePortablePhase,
@@ -20,15 +26,21 @@ import type { NativeProjectPaths } from './native-types.js';
 
 export const NATIVE_CHILDREN_FILE = 'children.yaml';
 export const NATIVE_CHILDREN_SCHEMA = 'comet.native.children.v1' as const;
-export const NATIVE_CHILDREN_SCHEMA_V2 = 'comet.native.children.v2' as const;
+export const NATIVE_CHILDREN_V2_SCHEMA = 'comet.native.children.v2' as const;
+export const NATIVE_CHILDREN_SCHEMA_V2 = NATIVE_CHILDREN_V2_SCHEMA;
 
 const NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const ROOT_KEYS_V1 = new Set(['schema', 'children']);
 const ROOT_KEYS_V2 = new Set(['schema', 'acceptance_index', 'children']);
+const V1_CHILD_KEYS = new Set(['name', 'depends_on', 'covers']);
+const V2_CHILD_KEYS = new Set(['name', 'summary', 'depends_on']);
 const CHILD_KEYS = new Set(['name', 'depends_on', 'covers']);
+
+type NativeChildrenContractVariant = 'v1' | 'summary-v2' | 'indexed-v2';
 
 export interface NativeChildDefinition {
   name: string;
+  summary: string | null;
   depends_on: string[];
   covers: string[];
 }
@@ -49,10 +61,20 @@ export interface NativeChildrenDocument {
   size: number;
 }
 
-export type NativeChildDerivedStatus = 'pending' | 'ready' | 'active' | 'done' | 'blocked';
+export type NativeChildDerivedStatus =
+  | 'pending'
+  | 'ready'
+  | 'active'
+  | 'verified'
+  | 'integrated'
+  | 'archived'
+  | 'needs-reverify'
+  | 'done'
+  | 'blocked';
 
 export interface NativeChildStatusProjection {
   name: string;
+  summary: string | null;
   dependsOn: string[];
   covers: string[];
   status: NativeChildDerivedStatus;
@@ -62,6 +84,8 @@ export interface NativeChildStatusProjection {
 }
 
 export interface NativeChildrenInspection {
+  schema?: NativeChildrenContract['schema'];
+  coordinationChoiceRequired?: boolean;
   contractHash: string | null;
   confirmed: boolean;
   parentBranch: string | null;
@@ -74,6 +98,12 @@ interface WorkspaceSource {
   projectRoot: string;
   paths: NativeProjectPaths;
   parent: boolean;
+}
+
+export interface NativeV1SupervisorParentCandidate {
+  paths: NativeProjectPaths;
+  state: NativePortableState;
+  inspection: NativeChildrenInspection;
 }
 
 interface ChildFact {
@@ -93,9 +123,9 @@ interface ArchivedChildEvidence extends ArchivedChildState {
   committedState: NativePortableState | null;
 }
 
-function record(value: unknown, label: string): Record<string, unknown> {
+function record(value: unknown, label: string, hint = ''): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
+    throw new Error(`${label} must be an object${hint}`);
   }
   return value as Record<string, unknown>;
 }
@@ -108,7 +138,12 @@ function exactKeys(
   const unknown = Object.keys(value).filter((key) => !known.has(key));
   const missing = [...known].filter((key) => !(key in value));
   if (unknown.length > 0 || missing.length > 0) {
-    throw new Error(`${label} fields are invalid`);
+    const details = [
+      ...(missing.length > 0 ? [`missing ${missing.join(', ')}`] : []),
+      ...(unknown.length > 0 ? [`unexpected ${unknown.join(', ')}`] : []),
+      `expected ${[...known].join(', ')}`,
+    ];
+    throw new Error(`${label} fields are invalid: ${details.join('; ')}`);
   }
 }
 
@@ -192,7 +227,11 @@ export function nativeChildrenAcceptanceValidation(
 }
 
 function parseAcceptanceIndex(value: unknown): Record<string, NativeChildAcceptanceIndexEntry> {
-  const index = record(value, 'Native children acceptance_index');
+  const index = record(
+    value,
+    'Native children acceptance_index',
+    ' keyed by acceptance ID, for example A1: { source: brief.md, text: "Full acceptance text" }',
+  );
   const result: Record<string, NativeChildAcceptanceIndexEntry> = {};
   for (const [id, entry] of Object.entries(index)) {
     const item = record(entry, `Native children acceptance_index.${id}`);
@@ -228,8 +267,11 @@ function validateAcceptanceIndex(
     if (!expected) continue;
     const actualEntry = index[id];
     if (actualEntry.source !== expected.source || actualEntry.text !== expected.text) {
+      const mismatched = (['source', 'text'] as const).filter(
+        (key) => actualEntry[key] !== expected[key],
+      );
       throw new Error(
-        `Native children acceptance_index.${id} does not match the acceptance catalog`,
+        `Native children acceptance_index.${id} does not match the acceptance catalog: copy ${mismatched.join(', ')} exactly from the current acceptance catalog`,
       );
     }
   }
@@ -246,29 +288,58 @@ export function parseNativeChildrenContract(
   }
   const root = record(document.toJS({ mapAsMap: false }), 'Native children contract');
   const schema = root.schema;
-  if (schema === NATIVE_CHILDREN_SCHEMA_V2) {
-    exactKeys(root, ROOT_KEYS_V2, 'Native children contract');
-  } else {
+  if (schema !== NATIVE_CHILDREN_SCHEMA && schema !== NATIVE_CHILDREN_V2_SCHEMA) {
     exactKeys(root, ROOT_KEYS_V1, 'Native children contract');
-  }
-  if (schema !== NATIVE_CHILDREN_SCHEMA && schema !== NATIVE_CHILDREN_SCHEMA_V2) {
     throw new Error(
-      `Native children schema must be ${NATIVE_CHILDREN_SCHEMA} or ${NATIVE_CHILDREN_SCHEMA_V2}`,
+      `Native children schema must be ${NATIVE_CHILDREN_SCHEMA} or ${NATIVE_CHILDREN_V2_SCHEMA}`,
     );
   }
+  const variant: NativeChildrenContractVariant =
+    schema === NATIVE_CHILDREN_SCHEMA
+      ? 'v1'
+      : 'acceptance_index' in root
+        ? 'indexed-v2'
+        : 'summary-v2';
+  const variantLabel = variant.replace('-', ' ');
+  exactKeys(
+    root,
+    variant === 'indexed-v2' ? ROOT_KEYS_V2 : ROOT_KEYS_V1,
+    'Native children contract',
+  );
   if (!Array.isArray(root.children) || root.children.length === 0) {
     throw new Error('Native children must be a non-empty array');
   }
   const children = root.children.map((entry, index): NativeChildDefinition => {
     const child = record(entry, `Native child ${index}`);
-    exactKeys(child, CHILD_KEYS, `Native child ${index}`);
+    exactKeys(
+      child,
+      variant === 'indexed-v2'
+        ? CHILD_KEYS
+        : variant === 'summary-v2'
+          ? V2_CHILD_KEYS
+          : V1_CHILD_KEYS,
+      `Native ${variantLabel} child fields (child ${index})`,
+    );
     if (typeof child.name !== 'string' || !NAME_PATTERN.test(child.name)) {
       throw new Error(`Native child ${index} name is invalid`);
     }
+    const readableV2 = variant === 'summary-v2';
+    if (readableV2) {
+      if (typeof child.summary !== 'string' || child.summary.trim().length === 0) {
+        throw new Error(`Native child ${child.name} summary must be a non-empty string`);
+      }
+      if (child.summary.length > 2_000) {
+        throw new Error(`Native child ${child.name} summary exceeds 2000 characters`);
+      }
+    }
     return {
       name: child.name,
+      summary: readableV2 ? (child.summary as string) : null,
       depends_on: stringList(child.depends_on, `Native child ${child.name} depends_on`),
-      covers: stringList(child.covers, `Native child ${child.name} covers`),
+      covers:
+        variant === 'indexed-v2' || variant === 'v1'
+          ? stringList(child.covers, `Native child ${child.name} covers`)
+          : [],
     };
   });
   const names = children.map(({ name }) => name);
@@ -282,13 +353,14 @@ export function parseNativeChildrenContract(
   }
   assertAcyclic(children);
   if (schema === NATIVE_CHILDREN_SCHEMA_V2) {
-    const acceptanceIndex = parseAcceptanceIndex(root.acceptance_index);
-    validateAcceptanceIndex(acceptanceIndex, acceptanceIds, options);
-    if (acceptanceIds) {
+    if (variant === 'indexed-v2') {
+      const acceptanceIndex = parseAcceptanceIndex(root.acceptance_index);
+      validateAcceptanceIndex(acceptanceIndex, acceptanceIds, options);
       const indexedAcceptanceIds = Object.keys(acceptanceIndex);
       validateCoverage(children, indexedAcceptanceIds, indexedAcceptanceIds);
+      return { schema: NATIVE_CHILDREN_V2_SCHEMA, acceptance_index: acceptanceIndex, children };
     }
-    return { schema: NATIVE_CHILDREN_SCHEMA_V2, acceptance_index: acceptanceIndex, children };
+    return { schema: NATIVE_CHILDREN_V2_SCHEMA, children };
   }
   if (acceptanceIds) validateCoverage(children, acceptanceIds);
   return { schema: NATIVE_CHILDREN_SCHEMA, children };
@@ -314,6 +386,43 @@ export async function readNativeChildrenContract(options: {
     contract: parseNativeChildrenContract(source.text, options.acceptanceIds, options.validation),
     size: source.size,
   };
+}
+
+function decisionsSection(source: string): string | null {
+  const heading = /^#\s+(?:Decisions|决策)\s*$/imu.exec(source);
+  if (!heading || heading.index === undefined) return null;
+  const section = source.slice(heading.index + heading[0].length);
+  return section.split(/^#\s+/mu, 1)[0] ?? section;
+}
+
+/**
+ * Detect an explicitly recorded Supervisor Shape before children.yaml exists.
+ *
+ * This intentionally requires the formal Decisions section, an explicit Supervisor Change
+ * declaration, and at least two child declarations. It does not infer coordination from brief
+ * length, acceptance count, or ordinary task wording.
+ */
+export function hasNativeSupervisorShapeIntent(source: string): boolean {
+  const decisions = decisionsSection(source);
+  if (!decisions || !/Supervisor\s+Change/iu.test(decisions)) return false;
+  const childDeclarations = decisions.match(/^\s*[-*]\s+(?:Child\b|子任务\b|子 Change\b)/gimu);
+  const numberedChildren = decisions.match(/\bChild\s+\d+\b/giu);
+  return Math.max(childDeclarations?.length ?? 0, numberedChildren?.length ?? 0) >= 2;
+}
+
+export async function readNativeSupervisorShapeIntent(changeDir: string): Promise<boolean> {
+  try {
+    const brief = await readNativeBoundedTextFile({
+      root: changeDir,
+      ref: 'brief.md',
+      maxBytes: null,
+      includeHash: false,
+    });
+    return hasNativeSupervisorShapeIntent(brief.text);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
 }
 
 export function hashNativeParentContract(options: {
@@ -343,6 +452,133 @@ async function workspaceSources(paths: NativeProjectPaths): Promise<WorkspaceSou
     sources.push({ projectRoot: paths.projectRoot, paths, parent: true });
   }
   return sources;
+}
+
+/**
+ * Locate the unique active v1 Supervisor parent for a Child archive. v1 is
+ * intentionally discovered from its declared children contract and current
+ * Git binding; v2 Supervisor state is never inferred from this compatibility
+ * path.
+ */
+export async function findNativeV1SupervisorParents(options: {
+  paths: NativeProjectPaths;
+  childName: string;
+  targetBranch: string | null;
+}): Promise<{
+  candidate: NativeV1SupervisorParentCandidate | null;
+  blockers: string[];
+}> {
+  const sources = await workspaceSources(options.paths);
+  const candidates: NativeV1SupervisorParentCandidate[] = [];
+  const blockers: string[] = [];
+  const matchingParents = new Map<
+    string,
+    Array<{ source: WorkspaceSource; state: NativePortableState }>
+  >();
+  for (const source of sources) {
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(source.paths.changesDir, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name === options.childName) {
+        continue;
+      }
+      const changeDir = path.join(source.paths.changesDir, entry.name);
+      let state: NativePortableState;
+      try {
+        state = await readNativePortableState(path.join(changeDir, 'comet-state.yaml'));
+      } catch {
+        continue;
+      }
+      if (state.phase !== 'build' || state.status !== 'active') continue;
+      const contract = await readNativeChildrenContract({
+        changeDir,
+        ...(state.acceptance.length > 0
+          ? { acceptanceIds: state.acceptance.map(({ id }) => id) }
+          : {}),
+      });
+      if (!contract || contract.contract.schema !== NATIVE_CHILDREN_SCHEMA) continue;
+      if (!contract.contract.children.some(({ name }) => name === options.childName)) continue;
+      matchingParents.set(state.name, [
+        ...(matchingParents.get(state.name) ?? []),
+        { source, state },
+      ]);
+    }
+  }
+  for (const [parentName, records] of matchingParents) {
+    const targetRecords =
+      options.targetBranch === null
+        ? []
+        : records.filter(({ state }) => state.workspace.target_branch === options.targetBranch);
+    if (options.targetBranch === null) {
+      blockers.push(
+        `Native Supervisor Child ${options.childName} has no target branch to match parent ${parentName}`,
+      );
+      continue;
+    }
+    const boundRecord = targetRecords.find(
+      ({ source, state }) =>
+        inspectGitWorktree(source.projectRoot).currentBranch === state.workspace.change_branch,
+    );
+    if (!boundRecord) {
+      const targetRecord = records.find(
+        ({ state }) => state.workspace.target_branch !== options.targetBranch,
+      );
+      if (targetRecord) {
+        blockers.push(
+          `Native Supervisor parent ${parentName} targets ${targetRecord.state.workspace.target_branch ?? '(missing)'}, not ${options.targetBranch}`,
+        );
+      } else {
+        const state = targetRecords[0]?.state ?? records[0].state;
+        blockers.push(
+          `Native Supervisor parent ${parentName} is not bound to branch ${state.workspace.change_branch}`,
+        );
+      }
+      continue;
+    }
+    const { source, state } = boundRecord;
+    const parentPaths = source.paths;
+    const inspection = await inspectNativeChildren({ paths: parentPaths, state });
+    if (!inspection) {
+      blockers.push(`Native Supervisor parent ${parentName} has no readable Child inspection`);
+    } else if (!inspection.confirmed) {
+      blockers.push(`Native Supervisor parent ${parentName} requires Shape confirmation`);
+    } else if (inspection.allDone) {
+      candidates.push({ paths: parentPaths, state, inspection });
+    } else {
+      const incomplete = inspection.children
+        .filter(({ status }) => status !== 'done')
+        .map(({ name, status, message }) => `${name}=${status}${message ? ` (${message})` : ''}`)
+        .join(', ');
+      blockers.push(
+        `Native Supervisor parent ${parentName} is not ready to advance: ${incomplete || 'Child facts are incomplete'}`,
+      );
+    }
+  }
+  if (matchingParents.size === 0) {
+    blockers.push(
+      `Native Supervisor Child ${options.childName} has no active v1 parent declaring it`,
+    );
+  }
+  if (matchingParents.size > 1) {
+    blockers.push(
+      `Native Supervisor Child ${options.childName} has multiple active parents: ${[...matchingParents.keys()].join(', ')}`,
+    );
+  }
+  if (candidates.length === 1 && blockers.length === 0)
+    return { candidate: candidates[0], blockers };
+  if (candidates.length > 1) {
+    blockers.push(
+      `Native Supervisor Child ${options.childName} has multiple eligible parents: ${candidates
+        .map(({ state }) => state.name)
+        .join(', ')}`,
+    );
+  }
+  return { candidate: null, blockers };
 }
 
 async function readActiveChild(
@@ -453,6 +689,7 @@ export async function inspectNativeChildren(options: {
   state: NativePortableState;
 }): Promise<NativeChildrenInspection | null> {
   const changeDir = path.join(options.paths.changesDir, options.state.name);
+  const coordinationChoiceRequired = await readNativeSupervisorShapeIntent(changeDir);
   const document = await readNativeChildrenContract({
     changeDir,
     validation: nativeChildrenAcceptanceValidation(options.state),
@@ -463,6 +700,7 @@ export async function inspectNativeChildren(options: {
   if (!document) {
     return options.state.children_contract_hash
       ? {
+          ...(coordinationChoiceRequired ? { coordinationChoiceRequired: true } : {}),
           contractHash: null,
           confirmed: false,
           parentBranch: options.state.workspace.change_branch,
@@ -470,17 +708,110 @@ export async function inspectNativeChildren(options: {
           readyChildren: [],
           allDone: false,
         }
-      : null;
+      : coordinationChoiceRequired
+        ? {
+            coordinationChoiceRequired: true,
+            contractHash: null,
+            confirmed: false,
+            parentBranch: options.state.workspace.change_branch,
+            children: [],
+            readyChildren: [],
+            allDone: false,
+          }
+        : null;
   }
 
   const contractHash = hashNativeParentContract({
     acceptance: options.state.acceptance,
     children: document.contract,
   });
+  const parentBranch = options.state.workspace.change_branch;
   const confirmed =
     options.state.phase !== 'shape' && options.state.children_contract_hash === contractHash;
+  if (document.contract.schema === NATIVE_CHILDREN_V2_SCHEMA) {
+    let supervisor = await readNativeSupervisorState(options.paths, options.state.name);
+    if (!supervisor) {
+      const targetBranch =
+        options.state.workspace.target_branch ?? options.state.workspace.change_branch;
+      if (targetBranch) {
+        const rebuilt = await rebuildNativeSupervisorStateFromFacts({
+          paths: options.paths,
+          parent: options.state.name,
+          targetBranch,
+          contract: document.contract,
+        });
+        if (rebuilt) {
+          supervisor = rebuilt;
+          await writeNativeSupervisorState(options.paths, rebuilt);
+        }
+      }
+    }
+    if (supervisor) {
+      const projected = projectNativeSupervisorChildren(supervisor);
+      if (options.state.children_contract_hash !== contractHash) {
+        return {
+          ...projected,
+          schema: document.contract.schema,
+          ...(coordinationChoiceRequired ? { coordinationChoiceRequired: true } : {}),
+          contractHash,
+          confirmed: false,
+          readyChildren: [],
+          allDone: false,
+          children: projected.children.map((child) => ({
+            ...child,
+            message: 'Supervisor child plan changed; Shape confirmation is required',
+          })),
+        };
+      }
+      return {
+        ...projected,
+        schema: document.contract.schema,
+        ...(coordinationChoiceRequired ? { coordinationChoiceRequired: true } : {}),
+        contractHash,
+        confirmed,
+      };
+    }
+    const definitions = new Map(document.contract.children.map((child) => [child.name, child]));
+    const projections = document.contract.children.map(
+      (child): NativeChildStatusProjection => ({
+        name: child.name,
+        summary: child.summary,
+        dependsOn: [...child.depends_on],
+        covers: [],
+        status:
+          confirmed &&
+          child.depends_on.every((dependency) =>
+            document.contract.children
+              .filter(({ name }) => name !== child.name)
+              .every(({ name }) => name !== dependency),
+          )
+            ? 'ready'
+            : 'pending',
+        phase: null,
+        projectRoot: null,
+        message: confirmed ? null : 'Parent Shape confirmation is required',
+      }),
+    );
+    // The fallback only applies before the machine state is first written. A dependency
+    // is ready only when all of its declared ancestors are represented in the plan;
+    // the persisted Supervisor state becomes authoritative as soon as Build starts.
+    for (const projection of projections) {
+      if (projection.status !== 'ready') continue;
+      const definition = definitions.get(projection.name)!;
+      if (definition.depends_on.length > 0) projection.status = 'pending';
+    }
+    return {
+      schema: document.contract.schema,
+      ...(coordinationChoiceRequired ? { coordinationChoiceRequired: true } : {}),
+      contractHash,
+      confirmed,
+      parentBranch,
+      children: projections,
+      readyChildren: projections.filter(({ status }) => status === 'ready').map(({ name }) => name),
+      allDone: false,
+    };
+  }
   const sources = await workspaceSources(options.paths);
-  const parentBranch = options.state.workspace.change_branch;
   const names = new Set(document.contract.children.map(({ name }) => name));
   const archives = new Map<string, ArchivedChildEvidence[]>();
   const active = new Map<string, Array<{ source: WorkspaceSource; state: NativePortableState }>>();
@@ -580,6 +911,7 @@ export async function inspectNativeChildren(options: {
     }
     const projection: NativeChildStatusProjection = {
       name,
+      summary: definition.summary,
       dependsOn: [...definition.depends_on],
       covers: [...definition.covers],
       status,
@@ -592,6 +924,8 @@ export async function inspectNativeChildren(options: {
   };
   const children = document.contract.children.map(({ name }) => resolve(name));
   return {
+    schema: document.contract.schema,
+    ...(coordinationChoiceRequired ? { coordinationChoiceRequired: true } : {}),
     contractHash,
     confirmed,
     parentBranch,

@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { parseDocument } from 'yaml';
+import { parseNativeChildrenContract } from '../../../domains/comet-native/native-children.js';
 
 const roots = {
   en: path.resolve('assets', 'skills', 'comet-native'),
@@ -59,7 +60,7 @@ describe('Comet Native Skills', () => {
       expect(contents[0].split(/\r?\n/u).length).toBeLessThanOrEqual(130);
       expect(
         contents.reduce((total, source) => total + source.split(/\r?\n/u).length, 0),
-      ).toBeLessThanOrEqual(400);
+      ).toBeLessThanOrEqual(425); // Includes the copyable Supervisor child-plan example.
       expect(headings(contents[0])).toHaveLength(10);
     }
 
@@ -92,8 +93,13 @@ describe('Comet Native Skills', () => {
           '`workspaceFinishResult`',
           '`recoveryArgs`',
           '`children.yaml`',
+          '`childSummary`',
           '`readyChildren`',
-          '`finish=merge`',
+          '`review.status=passed`',
+          '`scopeIds`',
+          '最终全量验证',
+          '原先通过 `finish=merge` 完成的合入步骤现由 Runtime 负责',
+          'Supervisor 统筹动作',
           '`repair-child`',
         ],
       },
@@ -116,8 +122,13 @@ describe('Comet Native Skills', () => {
           '`workspaceFinishResult`',
           '`recoveryArgs`',
           '`children.yaml`',
+          '`childSummary`',
           '`readyChildren`',
-          '`finish=merge`',
+          '`review.status=passed`',
+          '`scopeIds`',
+          'final full verification',
+          'Runtime now owns the integration step formerly performed through `finish=merge`',
+          'Supervisor coordination actions',
           '`repair-child`',
         ],
       },
@@ -128,10 +139,83 @@ describe('Comet Native Skills', () => {
       for (const term of variant.required) {
         expect(skill, `${variant.language}: ${term}`).toContain(term);
       }
+      const statusMarker =
+        variant.language === 'zh'
+          ? '状态包含 `childSummary`'
+          : 'When status contains `childSummary`';
+      expect(skill.match(new RegExp(statusMarker, 'gu')) ?? []).toHaveLength(1);
+      expect(skill).not.toContain(
+        variant.language === 'zh'
+          ? 'Archive 必须逐个使用 `finish=merge` 合入 Supervisor Change 分支'
+          : 'Archive them one at a time with `finish=merge` into the Supervisor Change branch',
+      );
       expect(skill).not.toContain('git worktree list --porcelain');
       expect(skill).not.toContain('comet doctor --repair --scope project');
       expect(skill).not.toContain('scripts/comet-native-runtime.mjs');
       expect(skill).not.toContain('comet-native-<cmd>.mjs');
+    }
+  });
+
+  it('keeps clarification coverage aligned with repository and Agent sources', async () => {
+    const variants = [
+      { language: 'zh' as const, required: '项目文档、现有 Agent 指令' },
+      { language: 'en' as const, required: 'project documentation, existing Agent instructions' },
+    ];
+    for (const variant of variants) {
+      const clarification = await read(variant.language, 'reference/clarification.md');
+      expect(clarification).toContain(variant.required);
+    }
+  });
+
+  it('offers explicit cleanup for clean archived change worktrees', async () => {
+    const variants = [
+      {
+        language: 'zh' as const,
+        required: [
+          '普通 change 归档后，如有已经归档且没有未提交修改的 change worktree，向用户提供清理选项',
+          '只有用户确认后才执行 `git worktree remove`',
+          '存在未提交修改或仍在使用的 worktree 必须保留',
+        ],
+      },
+      {
+        language: 'en' as const,
+        required: [
+          'offer cleanup for an archived worktree with no uncommitted changes',
+          'Run `git worktree remove` only after user confirmation',
+          'keep any worktree with uncommitted changes or active use',
+        ],
+      },
+    ];
+
+    for (const variant of variants) {
+      const skill = await read(variant.language, 'SKILL.md');
+      for (const term of variant.required) {
+        expect(skill, `${variant.language}: ${term}`).toContain(term);
+      }
+    }
+  });
+
+  it('uses Skill language only to initialize config, then project config owns artifacts', async () => {
+    const variants = [
+      {
+        language: 'zh' as const,
+        required: ['`comet init`', '产物跟随项目配置', '用户明确要求覆盖时才传入 `--language`'],
+      },
+      {
+        language: 'en' as const,
+        required: [
+          '`comet init`',
+          'artifacts follow the project setting',
+          '`--language` is only for an explicit user override',
+        ],
+      },
+    ];
+
+    for (const variant of variants) {
+      const skill = await read(variant.language, 'SKILL.md');
+      for (const term of variant.required) {
+        expect(skill, `${variant.language}: ${term}`).toContain(term);
+      }
     }
   });
 
@@ -176,25 +260,33 @@ describe('Comet Native Skills', () => {
         required: [
           '拆分检测',
           '可独立实现和验证',
-          '一次 Shape 确认',
+          '最终 Shape 确认',
           '确认前不得创建子 change',
-          '自动派发',
-          '不支持并行时按顺序执行',
+          '多会话协作（推荐）',
+          '单会话推进',
+          '自动改用 subagent',
+          '不再询问推进方式',
+          '不得自动改为单会话推进',
+          'supervisor-cancel',
           '需求文字长、任务条目多本身不能触发拆分',
-          '保持单一 Native change',
+          '继续使用单个 Native Change',
         ],
       },
       {
         language: 'en' as const,
         required: [
           'decomposition preflight',
-          'independently implement and verify',
-          'one Shape confirmation',
-          'Do not create child changes before confirmation',
-          'automatically dispatch',
-          'serial fallback',
+          'implemented and verified independently',
+          'final Shape confirmation',
+          'Before confirmation, do not create child changes',
+          'Multi-session coordination (recommended)',
+          'Single-session progression',
+          'automatically switch to a subagent',
+          'do not ask for the coordination mode again',
+          'must not automatically switch to single-session progression',
+          'supervisor-cancel',
           'text length and task count alone must not trigger decomposition',
-          'keep a single Native change',
+          'continue with one Native Change',
         ],
       },
     ];
@@ -298,7 +390,7 @@ describe('Comet Native Skills', () => {
         'workspace',
         'preparation',
         'nextPageArgs',
-        'children',
+        'childSummary',
         'readyChildren',
         'workspaceFinishResult',
       ]) {
@@ -317,6 +409,37 @@ describe('Comet Native Skills', () => {
       expect(commands).not.toContain('comet native checkpoint <change-name>');
     }
   });
+
+  it.each(['en', 'zh'] as const)(
+    'provides an executable indexed Supervisor example and workspace guidance in %s',
+    async (language) => {
+      const artifacts = await read(language, 'reference/artifacts.md');
+      const example = /```yaml\n([\s\S]*?)\n```/u.exec(artifacts)?.[1];
+      expect(example).toBeTruthy();
+      const contract = parseNativeChildrenContract(example!, ['A1', 'A2']);
+      expect(contract.acceptance_index).toEqual({
+        A1: { source: 'brief.md', text: expect.any(String) },
+        A2: { source: 'brief.md', text: expect.any(String) },
+      });
+      expect(contract.children.map(({ name, covers }) => ({ name, covers }))).toEqual([
+        { name: 'alpha', covers: ['A1'] },
+        { name: 'beta', covers: ['A2'] },
+      ]);
+      const commands = await read(language, 'reference/commands.md');
+      for (const field of [
+        'projectRoot',
+        'verificationRoot',
+        'changeDir',
+        'supervisorStateRef',
+        '--project-root',
+      ]) {
+        expect(commands).toContain(`\`${field}\``);
+      }
+      expect(commands).toContain(
+        language === 'zh' ? '至少一项集成检查' : 'at least one integration check',
+      );
+    },
+  );
 
   it('keeps recovery focused on exceptional safety decisions and exact Runtime actions', async () => {
     const variants = [

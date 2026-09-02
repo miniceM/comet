@@ -4,6 +4,9 @@ export const NATIVE_PORTABLE_HISTORY_LIMIT = 50 as const;
 
 export type NativePortablePhase = 'shape' | 'build' | 'verify' | 'archive';
 export type NativePortableStatus = 'active' | 'await-user' | 'blocked' | 'done';
+export const NATIVE_SUPERVISOR_COORDINATION_MODES = ['multi-session', 'single-session'] as const;
+export type NativeSupervisorCoordinationMode =
+  (typeof NATIVE_SUPERVISOR_COORDINATION_MODES)[number];
 export type NativePortableVerificationResult = 'pending' | 'pass' | 'fail' | 'blocked';
 export type NativePortableVerificationAssurance =
   | 'host-attested'
@@ -82,6 +85,11 @@ export interface NativeBuilderHandoff {
   checks_truncated: boolean;
   known_limits: NativePortableText[];
   known_limits_truncated: boolean;
+  review: {
+    status: 'passed';
+    summary: NativePortableText;
+    reviewer_execution_ref: string;
+  } | null;
   submitted_at: string;
 }
 
@@ -150,6 +158,7 @@ export interface NativePortableState {
   state_version: number;
   brief: 'brief.md';
   children_contract_hash?: string;
+  coordination_mode?: NativeSupervisorCoordinationMode;
   spec_changes: NativePortableSpecChange[];
   workspace: NativePortableWorkspace;
   loop: NativePortableLoopState;

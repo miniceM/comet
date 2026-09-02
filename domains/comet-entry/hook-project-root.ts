@@ -2,10 +2,7 @@ import { promises as fs, realpathSync } from 'fs';
 import path from 'path';
 
 import { discoverNativeProject } from '../comet-native/native-paths.js';
-import {
-  assertClassicLayoutReadable,
-  discoverClassicProject,
-} from '../comet-classic/classic-layout.js';
+import { readWorkflowProjectConfig } from '../workflow-contract/project-config-reader.js';
 import { listGitWorktreeRoots } from '../../platform/paths/git-worktree.js';
 import type { CometHookRequest } from './hook-types.js';
 
@@ -126,7 +123,10 @@ export async function projectRootFrom(
   request?: CometHookRequest,
 ): Promise<string | null> {
   if (parsed.projectRoot) {
-    return request ? resolveCometHookProjectRoot(parsed.projectRoot, request) : parsed.projectRoot;
+    const candidate = request
+      ? await resolveCometHookProjectRoot(parsed.projectRoot, request)
+      : parsed.projectRoot;
+    return configuredProjectFrom(candidate);
   }
   // A Router without --project-root is a legacy/global installation. It must
   // use the host-provided working directory when one is available; the
@@ -136,23 +136,10 @@ export async function projectRootFrom(
   // neutral instead of applying another project's phase guard.
   if (!request?.cwd) return null;
 
-  const discoveryStart = request.cwd;
-  const discovered = await discoverNativeProject(discoveryStart);
-  for (const marker of [['.comet', 'config.yaml'], ['.git']]) {
-    try {
-      await fs.lstat(path.join(discovered, ...marker));
-      return discovered;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-  }
-  const classic = await discoverClassicProject(discoveryStart);
-  const layout = await assertClassicLayoutReadable(classic);
-  try {
-    await fs.lstat(layout.changesDir);
-    return classic;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
-  return null;
+  return configuredProjectFrom(request.cwd);
+}
+
+async function configuredProjectFrom(projectRoot: string): Promise<string | null> {
+  const discovered = await discoverNativeProject(projectRoot);
+  return (await readWorkflowProjectConfig(discovered)) === null ? null : discovered;
 }

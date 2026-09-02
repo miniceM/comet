@@ -1,11 +1,18 @@
 import { inspectNativeChildren } from './native-children.js';
 import { nativePortableContinuation } from './native-portable-continuation.js';
 import { migrateNativeLegacyChangeToPortable } from './native-portable-migration-runtime.js';
-import { recoverNativePortableChange } from './native-portable-recovery.js';
+import {
+  recoverNativePortableChange,
+  type NativePortableRecoveryResult,
+} from './native-portable-recovery.js';
+import { nativePortableStateSummary } from './native-portable-summary.js';
 import { applyNativeRunnerInput, readNativeRunnerInput } from './native-runner-input.js';
 import { NATIVE_SKILL_COORDINATION } from './native-runner-protocol.js';
 import {
-  completeNativePortableParentBuild,
+  dispatchNativeSupervisorReadyTasks,
+  readNativeSupervisorState,
+} from './native-supervisor.js';
+import {
   confirmNativePortableShape,
   confirmNativePortableSkillCoordinatedPass,
   confirmNativePortableVerifierUnavailable,
@@ -15,10 +22,15 @@ import {
   returnNativePortableChangeToBuild,
   returnNativePortableChangeToShape,
   retryNativePortableVerifier,
+  inspectNativeSupervisorParentReviewReadiness,
   type NativePortableExpectedContinuation,
   type NativePortableExpectedContinuationAction,
 } from './native-portable-runtime.js';
-import type { NativePortableState } from './native-portable-types.js';
+import {
+  NATIVE_SUPERVISOR_COORDINATION_MODES,
+  type NativePortableState,
+  type NativeSupervisorCoordinationMode,
+} from './native-portable-types.js';
 import {
   assertNoArguments,
   configuredPaths,
@@ -69,11 +81,30 @@ async function portableParentView(paths: NativeProjectPaths, state: NativePortab
   return {
     ...(children
       ? {
-          children: children.children,
+          childSummary: children.children.reduce<Record<string, number>>(
+            (summary, child) => ({ ...summary, [child.status]: (summary[child.status] ?? 0) + 1 }),
+            { total: children.children.length },
+          ),
           readyChildren: children.readyChildren,
         }
       : {}),
     continuation: nativePortableContinuation(state, children),
+  };
+}
+
+function compactRunnerResult<T extends { state: NativePortableState }>(result: T) {
+  return Object.fromEntries(
+    Object.entries(result).filter(
+      ([key]) => key !== 'state' && key !== 'response' && key !== 'supervisorState',
+    ),
+  ) as Omit<T, 'state' | 'response' | 'supervisorState'>;
+}
+
+function compactRecoveryResult(recovery: NativePortableRecoveryResult) {
+  return {
+    action: recovery.action,
+    reason: recovery.reason,
+    message: recovery.message,
   };
 }
 
@@ -90,6 +121,22 @@ export async function nativeNextCommand(
   const reviseRequirements = takeFlag(args, '--revise-requirements');
   const retryVerifier = takeFlag(args, '--retry-verifier');
   const resolveVerifierBlocker = takeFlag(args, '--resolve-verifier-blocker');
+  const coordinationModeText = takeOption(args, '--coordination-mode');
+  const coordinationMode = coordinationModeText as NativeSupervisorCoordinationMode | undefined;
+  if (
+    coordinationModeText !== undefined &&
+    !(NATIVE_SUPERVISOR_COORDINATION_MODES as readonly string[]).includes(coordinationModeText)
+  ) {
+    throw new NativeUsageError('--coordination-mode must be multi-session or single-session');
+  }
+  if (coordinationMode !== undefined && !confirmed) {
+    throw new NativeUsageError('--coordination-mode is only valid with --confirmed in Shape');
+  }
+  const maxParallelText = takeOption(args, '--max-parallel');
+  const maxParallel = maxParallelText === undefined ? 2 : Number(maxParallelText);
+  if (!Number.isSafeInteger(maxParallel) || maxParallel < 1) {
+    throw new NativeUsageError('--max-parallel must be a positive integer');
+  }
   const expectedContinuation = expectedContinuationOption(args);
   if (
     [
@@ -123,7 +170,7 @@ export async function nativeNextCommand(
       name,
     });
     return success('next', {
-      state,
+      state: nativePortableStateSummary(state),
       migration: { completed: true, summary },
       continuation: nativePortableContinuation(state),
     });
@@ -156,8 +203,8 @@ export async function nativeNextCommand(
       recovery.reason !== 'available'
     ) {
       return success('next', {
-        state: current,
-        recovery,
+        state: nativePortableStateSummary(current),
+        recovery: compactRecoveryResult(recovery),
         ...(await portableParentView(configured.paths, current)),
       });
     }
@@ -173,11 +220,13 @@ export async function nativeNextCommand(
           reason: drift.reason ?? 'Native confirmed requirements changed',
         });
         return success('next', {
-          state,
+          state: nativePortableStateSummary(state),
           ...(await portableParentView(configured.paths, state)),
         });
       }
-      if (await inspectNativeChildren({ paths: configured.paths, state: current })) {
+      const supervisor = await readNativeSupervisorState(configured.paths, name);
+      const children = await inspectNativeChildren({ paths: configured.paths, state: current });
+      if (children && !children.allDone && !supervisor) {
         throw new NativeUsageError(
           'Native parent Build advances child changes and does not accept a Builder handoff',
         );
@@ -191,20 +240,28 @@ export async function nativeNextCommand(
       maxVerifyFailures: configured.config.native.max_verify_failures,
     });
     return success('next', {
-      ...result,
+      ...compactRunnerResult(result),
+      state: nativePortableStateSummary(result.state),
       ...(await portableParentView(configured.paths, result.state)),
       coordination: NATIVE_SKILL_COORDINATION,
     });
   }
   const recovery = await recoverNativePortableChange({ paths: configured.paths, name });
   const current = recovery.state;
+  if (coordinationMode !== undefined && current.phase !== 'shape') {
+    throw new NativeUsageError('--coordination-mode is only valid when confirming Shape');
+  }
   if (!summary) throw new NativeUsageError('--summary is required');
   let state;
+  let parentAdvance: Awaited<
+    ReturnType<typeof inspectNativeSupervisorParentReviewReadiness>
+  > | null = null;
   if (confirmed) {
     if (current.phase === 'shape') {
       state = await confirmNativePortableShape({
         paths: configured.paths,
         name,
+        ...(coordinationMode === undefined ? {} : { coordinationMode }),
         expectedContinuation,
       });
     } else if (
@@ -275,8 +332,8 @@ export async function nativeNextCommand(
   } else {
     if (recovery.reason !== 'available') {
       return success('next', {
-        state: current,
-        recovery,
+        state: nativePortableStateSummary(current),
+        recovery: compactRecoveryResult(recovery),
         ...(await portableParentView(configured.paths, current)),
       });
     }
@@ -294,21 +351,50 @@ export async function nativeNextCommand(
       } else {
         const children = await inspectNativeChildren({ paths: configured.paths, state: current });
         if (children) {
+          let effectiveChildren = children;
+          let supervisorTasks = [] as Awaited<
+            ReturnType<typeof dispatchNativeSupervisorReadyTasks>
+          >['tasks'];
+          const supervisor = await readNativeSupervisorState(configured.paths, name);
+          if (supervisor && !children.allDone) {
+            const dispatched = await dispatchNativeSupervisorReadyTasks({
+              paths: configured.paths,
+              parent: name,
+              maxParallel,
+            });
+            supervisorTasks = dispatched.tasks;
+            if (
+              supervisorTasks.length > 0 ||
+              dispatched.state.stateVersion !== supervisor.stateVersion
+            ) {
+              effectiveChildren =
+                (await inspectNativeChildren({ paths: configured.paths, state: current })) ??
+                effectiveChildren;
+            }
+          }
           if (
-            children.allDone &&
+            effectiveChildren.allDone &&
             !(current.loop.stage === 'repairing' && current.verification_result === 'fail')
           ) {
-            state = await completeNativePortableParentBuild({
+            parentAdvance = await inspectNativeSupervisorParentReviewReadiness({
               paths: configured.paths,
               name,
-              summary,
+              trigger: 'recovery',
             });
+            state = parentAdvance.state;
           } else {
             return success('next', {
-              state: current,
-              children: children.children,
-              readyChildren: children.readyChildren,
-              continuation: nativePortableContinuation(current, children),
+              state: nativePortableStateSummary(current),
+              childSummary: effectiveChildren.children.reduce<Record<string, number>>(
+                (childSummary, child) => ({
+                  ...childSummary,
+                  [child.status]: (childSummary[child.status] ?? 0) + 1,
+                }),
+                { total: effectiveChildren.children.length },
+              ),
+              readyChildren: effectiveChildren.readyChildren,
+              ...(supervisorTasks.length > 0 ? { supervisorTasks } : {}),
+              continuation: nativePortableContinuation(current, effectiveChildren),
             });
           }
         }
@@ -316,14 +402,22 @@ export async function nativeNextCommand(
     }
     if (state) {
       return success('next', {
-        state,
+        state: nativePortableStateSummary(state),
+        ...(parentAdvance ? { parentAdvance: parentAdvance.parentAdvance } : {}),
         ...(await portableParentView(configured.paths, state)),
       });
     }
+    const continuationChildren =
+      current.phase === 'shape'
+        ? await inspectNativeChildren({ paths: configured.paths, state: current })
+        : null;
     return {
       command: 'next',
       exitCode: 65,
-      data: { state: current, continuation: nativePortableContinuation(current) },
+      data: {
+        state: nativePortableStateSummary(current),
+        continuation: nativePortableContinuation(current, continuationChildren),
+      },
       error: {
         code: 'invalid-data',
         message:
@@ -332,7 +426,8 @@ export async function nativeNextCommand(
     };
   }
   return success('next', {
-    state,
+    state: nativePortableStateSummary(state),
+    ...(coordinationMode === undefined ? {} : { coordinationMode }),
     ...(await portableParentView(configured.paths, state)),
   });
 }

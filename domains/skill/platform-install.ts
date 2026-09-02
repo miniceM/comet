@@ -21,6 +21,11 @@ import {
   type ClassicLayoutInitializationPermit,
 } from '../comet-classic/classic-layout-initialization.js';
 import {
+  mergeDshInstruction,
+  reconcileDshCordisPatch,
+  removeDshCordisPatch,
+} from './dsh-adapter.js';
+import {
   parseWorkflowProjectConfigDocument,
   projectConfigComment,
   renderStructuredProjectConfig,
@@ -51,6 +56,8 @@ type Manifest = {
 };
 
 const HOOK_ROUTER_SCRIPT = 'comet/scripts/comet-hook-router.mjs';
+export const OMP_HOOK_RELATIVE_PATH = ['hooks', 'pre', 'comet-hook-router.ts'] as const;
+export const OMP_HOOK_MARKER = '// Managed by Comet: Oh My Pi Hook Router bridge';
 const LEGACY_HOOK_SCRIPTS = [
   'comet/scripts/comet-hook-guard.mjs',
   'comet-native/scripts/comet-native-hook-guard.mjs',
@@ -75,6 +82,112 @@ interface HookCommandContext {
   platformId: string;
   scope: InstallScope;
   hookMatcher?: string;
+}
+
+export interface HookInvocation {
+  command: string;
+  args: string[];
+}
+
+export function renderOmpHookModule(): string {
+  return [
+    OMP_HOOK_MARKER,
+    "import { spawn } from 'node:child_process';",
+    "import { dirname, resolve } from 'node:path';",
+    "import { fileURLToPath } from 'node:url';",
+    "import type { ExtensionAPI } from '@oh-my-pi/pi-coding-agent';",
+    '',
+    "const ompRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');",
+    "const router = resolve(ompRoot, 'skills/comet/scripts/comet-hook-router.mjs');",
+    '',
+    'function runRouter(payload: string): Promise<{ code: number; stdout: string; stderr: string }> {',
+    '  return new Promise((done) => {',
+    '    let settled = false;',
+    "    let stderr = '';",
+    "    let stdout = '';",
+    '    const finish = (code: number, reason = stderr) => {',
+    '      if (settled) return;',
+    '      settled = true;',
+    '      done({ code, stdout, stderr: reason });',
+    '    };',
+    "    const child = spawn('node', [router, '--platform', 'oh-my-pi'], {",
+    "      stdio: ['pipe', 'pipe', 'pipe'],",
+    '      windowsHide: true,',
+    '    });',
+    "    child.stdout.setEncoding('utf8');",
+    "    child.stdout.on('data', (chunk: string) => {",
+    '      if (stdout.length < 262_144) stdout += chunk;',
+    '    });',
+    "    child.stderr.setEncoding('utf8');",
+    "    child.stderr.on('data', (chunk: string) => {",
+    '      if (stderr.length < 65_536) stderr += chunk;',
+    '    });',
+    "    child.on('error', (error) => finish(1, error.message));",
+    "    child.on('close', (code) => finish(code ?? 1));",
+    '    child.stdin.end(payload);',
+    '  });',
+    '}',
+    '',
+    'function readContext(stdout: string): string | undefined {',
+    '  for (const line of stdout.trim().split(/\\r?\\n/u).reverse()) {',
+    '    if (!line.trim()) continue;',
+    '    try {',
+    '      const value = JSON.parse(line) as {',
+    '        additionalContext?: unknown;',
+    '        hookSpecificOutput?: { additionalContext?: unknown };',
+    '      };',
+    '      const context = value.hookSpecificOutput?.additionalContext ?? value.additionalContext;',
+    "      if (typeof context === 'string' && context.trim()) return context;",
+    '    } catch {',
+    '      continue;',
+    '    }',
+    '  }',
+    '  return undefined;',
+    '}',
+    '',
+    'function sessionId(ctx: { sessionManager?: { getSessionFile?: () => string | undefined } }): string | undefined {',
+    '  return ctx.sessionManager?.getSessionFile?.();',
+    '}',
+    '',
+    'export default function cometHook(pi: ExtensionAPI): void {',
+    "  pi.on('before_agent_start', async (event, ctx) => {",
+    '    const result = await runRouter(',
+    '      JSON.stringify({',
+    "        hook_event_name: 'before_agent_start',",
+    '        task: event.prompt,',
+    '        cwd: ctx.cwd,',
+    '        session_id: sessionId(ctx),',
+    '      }),',
+    '    );',
+    '    if (result.code !== 0) return;',
+    '    const context = readContext(result.stdout);',
+    '    if (!context) return;',
+    '    return {',
+    '      message: {',
+    "        customType: 'comet.context-manifest',",
+    '        content: context,',
+    '        display: false,',
+    "        details: { source: 'comet.context-director' },",
+    '      },',
+    '    };',
+    '  });',
+    '',
+    "  pi.on('tool_call', async (event, ctx) => {",
+    '    const result = await runRouter(',
+    '      JSON.stringify({',
+    '        tool_name: event.toolName,',
+    '        tool_input: event.input,',
+    '        cwd: ctx.cwd,',
+    '        session_id: sessionId(ctx),',
+    '      }),',
+    '    );',
+    '    if (result.code === 0) return;',
+    "    const reason = result.stderr.trim() || 'Comet Hook Router blocked the tool call';",
+    '    return { block: true, reason };',
+    '  });',
+    '}',
+    '',
+  ].join('\n');
 }
 
 type HookInstallStatus = 'installed' | 'skipped' | 'failed';
@@ -113,7 +226,7 @@ function getManagedSkillPaths(manifest: Manifest): string[] {
   return [...new Set([...manifest.skills, ...(manifest.internalSkills ?? [])])];
 }
 
-function isManagedSkillPathForSelection(
+export function isManagedSkillPathForSelection(
   skillPath: string,
   workflowSelection: InitWorkflowSelection,
 ): boolean {
@@ -122,7 +235,8 @@ function isManagedSkillPathForSelection(
   return (
     NATIVE_SHARED_SKILL_PATHS.has(skillPath) ||
     skillPath.startsWith('comet-native/') ||
-    skillPath.startsWith('comet-any/')
+    skillPath.startsWith('comet-any/') ||
+    skillPath.startsWith('comet-memory/')
   );
 }
 
@@ -971,6 +1085,23 @@ async function copyCometRulesForPlatform(
   scope: InstallScope = 'project',
   workflowSelection: InitWorkflowSelection = 'classic',
 ): Promise<{ copied: number; skipped: number; failed: number }> {
+  if (platform.rulesFormat === 'dsh') {
+    const manifest = await readManifest();
+    const rulePaths = selectRulePathsForLanguage(manifest.rules ?? [], languageId);
+    if (rulePaths.length === 0) return { copied: 0, skipped: 0, failed: 0 };
+    const src = path.join(getAssetsDir(), 'skills', rulePaths[0]);
+    try {
+      if (!(await fileExists(src))) {
+        console.error(`    Rule source not found: ${rulePaths[0]}`);
+        return { copied: 0, skipped: 0, failed: 1 };
+      }
+      return mergeDshInstruction(baseDir, platform, scope, await readFile(src, 'utf8'), overwrite);
+    } catch (err) {
+      console.error(`    Failed to copy dsh instruction Rule: ${(err as Error).message}`);
+      return { copied: 0, skipped: 0, failed: 1 };
+    }
+  }
+
   if (!platform.rulesDir || !platform.rulesFormat) {
     return { copied: 0, skipped: 0, failed: 0 };
   }
@@ -1095,6 +1226,7 @@ ${content}`;
  *   'windsurf' — hooks.json with pre_write_code array
  *   'copilot' — hooks/*.json with preToolUse
  *   'kiro' — hooks/*.kiro.hook JSON files
+ *   'omp' — .omp/hooks/pre/comet-hook-router.ts extension module
  *   'trae' — hooks.json with version and PreToolUse grouped command hooks
  */
 async function installManagedHooksForPlatform(
@@ -1114,7 +1246,12 @@ async function installManagedHooksForPlatform(
     };
   }
 
-  if (scope === 'global' && platform.hookFormat !== 'trae' && !options.allowGlobal) {
+  if (
+    scope === 'global' &&
+    platform.hookFormat !== 'trae' &&
+    !options.allowGlobal &&
+    !platform.supportsGlobalHooks
+  ) {
     return {
       status: 'skipped',
       reason: 'blocking Hooks are project-scoped',
@@ -1164,6 +1301,34 @@ async function installManagedHooksForPlatform(
         }
         return result;
       }
+      case 'dsh': {
+        await reconcileDshCordisPatch(baseDir, platform, scope);
+        try {
+          const result = await installClaudeCodeHooks(
+            baseDir,
+            platformBase,
+            skillsDir,
+            hooksConfig,
+            platform.hookConfigFile ?? 'hooks.json',
+            platform.name,
+            { platformId: platform.id, scope },
+          );
+          if (result.status !== 'installed') {
+            await removeDshCordisPatch(baseDir, platform, scope);
+            return result;
+          }
+          return {
+            status: 'installed',
+            reason:
+              scope === 'project'
+                ? 'dsh Hook config installed; load the official bridge in a profile and run `dsh ... --patch .dsh/cordis.patch.yml` to activate it'
+                : 'dsh Hook config installed; load the official bridge in the active profile to activate it',
+          };
+        } catch (error) {
+          await removeDshCordisPatch(baseDir, platform, scope);
+          throw error;
+        }
+      }
       case 'qwen':
       case 'qoder':
       case 'codebuddy':
@@ -1203,6 +1368,21 @@ async function installManagedHooksForPlatform(
           platformId: platform.id,
           scope,
         });
+      case 'omp': {
+        const hookPath = path.join(platformBase, ...OMP_HOOK_RELATIVE_PATH);
+        if (await fileExists(hookPath)) {
+          const existing = await readFile(hookPath, 'utf8');
+          if (!existing.includes(OMP_HOOK_MARKER)) {
+            return {
+              status: 'failed',
+              reason: `refusing to overwrite user-owned Oh My Pi Hook at ${hookPath}`,
+            };
+          }
+        }
+        await ensureDir(path.dirname(hookPath));
+        await writeFile(hookPath, renderOmpHookModule(), 'utf-8');
+        return { status: 'installed' };
+      }
       case 'trae':
         return await installTraeHooks(
           baseDir,
@@ -1245,6 +1425,28 @@ function quoteCommandArg(value: string): string {
 }
 
 /** Build a hook command that is stable even when the hook runner executes from a subdirectory. */
+function buildHookInvocation(
+  baseDir: string,
+  skillsDir: string,
+  scriptRelPath: string,
+  context?: HookCommandContext,
+  extraArgs: readonly string[] = [],
+): HookInvocation {
+  const projectRoot = path.resolve(baseDir);
+  const scriptPath = path.join(projectRoot, skillsDir, 'skills', ...scriptRelPath.split('/'));
+  const args = [scriptPath];
+  if (scriptRelPath === HOOK_ROUTER_SCRIPT && context) {
+    args.push('--platform', context.platformId);
+    if (context.scope === 'project') {
+      args.push('--project-root', projectRoot);
+    }
+    return { command: 'node', args: [...args, ...extraArgs] };
+  }
+  args.push('--project-root', projectRoot);
+  return { command: 'node', args: [...args, ...extraArgs] };
+}
+
+/** Build a shell-form hook command for platforms whose Hook schema only accepts a string. */
 function buildHookCommand(
   baseDir: string,
   skillsDir: string,
@@ -1315,20 +1517,32 @@ function parseCommandTokens(command: string): string[] | undefined {
   return tokens;
 }
 
-function isManagedHookCommand(command: unknown, scriptRelPaths: string[]): boolean {
+function isManagedHookCommand(command: unknown, scriptRelPaths: string[], args?: unknown): boolean {
   if (typeof command !== 'string') return false;
+
+  const normalize = (value: string): string =>
+    value.replace(/\\/g, '/').replace(/\.(?:sh|mjs)$/u, '');
+  const matchesManagedScript = (scriptPath: string): boolean =>
+    scriptRelPaths.some((scriptRelPath) =>
+      normalize(scriptPath).endsWith(`/skills/${normalize(scriptRelPath.replace(/\\/g, '/'))}`),
+    );
+
+  if (Array.isArray(args)) {
+    const executable = command.replace(/\\/g, '/').split('/').pop()?.toLowerCase();
+    const scriptPath = args[0];
+    return (
+      (executable === 'node' || executable === 'node.exe') &&
+      typeof scriptPath === 'string' &&
+      matchesManagedScript(scriptPath)
+    );
+  }
 
   // Match both the current `node .../comet-hook-guard.mjs` form and the legacy
   // `bash .../comet-hook-guard.sh` form so uninstall also cleans up hooks
   // written by older Comet releases. Compare basenames without extension.
   const tokens = parseCommandTokens(command.trim());
   if (!tokens || tokens.length < 2 || !['node', 'bash', 'sh'].includes(tokens[0])) return false;
-  const commandPath = tokens[1].replace(/\\/g, '/');
-  const normalize = (value: string): string => value.replace(/\.(?:sh|mjs)$/u, '');
-
-  return scriptRelPaths.some((scriptRelPath) =>
-    normalize(commandPath).endsWith(`/skills/${normalize(scriptRelPath.replace(/\\/g, '/'))}`),
-  );
+  return matchesManagedScript(tokens[1].replace(/\\/g, '/'));
 }
 
 const COPILOT_COMMAND_FIELDS = ['command', 'bash', 'powershell'] as const;
@@ -1383,9 +1597,8 @@ function mergeHookGroups<T extends { command: string }>(
     if (!Array.isArray(record.hooks)) return [record];
 
     const hooks = record.hooks.filter((hook) => {
-      const command =
-        hook && typeof hook === 'object' ? (hook as Record<string, unknown>).command : undefined;
-      return !isManagedHookCommand(command, scriptRelPaths);
+      const hookRecord = hook && typeof hook === 'object' ? (hook as Record<string, unknown>) : {};
+      return !isManagedHookCommand(hookRecord.command, scriptRelPaths, hookRecord.args);
     });
     const removedManagedHook = hooks.length !== record.hooks.length;
     const isPlainManagedGroup = Object.keys(record).every(
@@ -1444,11 +1657,13 @@ async function removeManagedHooksFromJsonFile(
     const record = group as Record<string, unknown>;
     if (!Array.isArray(record.hooks)) return record;
     const handlers = record.hooks.filter((handler) => {
-      const command =
-        handler && typeof handler === 'object'
-          ? (handler as Record<string, unknown>).command
-          : undefined;
-      const managed = isManagedHookCommand(command, scriptRelPaths);
+      const handlerRecord =
+        handler && typeof handler === 'object' ? (handler as Record<string, unknown>) : {};
+      const managed = isManagedHookCommand(
+        handlerRecord.command,
+        scriptRelPaths,
+        handlerRecord.args,
+      );
       if (managed) removed++;
       return !managed;
     });
@@ -1499,21 +1714,39 @@ async function installClaudeCodeHooks(
 ): Promise<HookInstallResult> {
   const settingsPath = path.join(platformBase, configFile);
 
-  // Claude Code format: { matcher, hooks: [{ type: "command", command }] }
+  // Claude Code accepts exec-form Hooks with { command, args }, which avoids
+  // starting Git Bash/PowerShell on Windows. Keep the string-only shape for
+  // the other Claude-compatible platforms until their contracts support args.
   interface ClaudeCodeHookEntry {
     matcher: string;
-    hooks: Array<{ type: string; command: string }>;
+    hooks: Array<{ type: string; command: string; args?: string[] }>;
   }
 
   // Group by matcher so hooks sharing the same matcher are merged
-  const matcherGroups: Record<string, Array<{ type: string; command: string }>> = {};
+  const matcherGroups: Record<
+    string,
+    Array<{ type: string; command: string; args?: string[] }>
+  > = {};
   for (const [scriptRelPath, config] of Object.entries(hooksConfig)) {
-    const command = buildHookCommand(baseDir, skillsDir, scriptRelPath, context, config.arguments);
     const matcher = resolveInstalledHookMatcher(context, config.matcher);
     if (!matcherGroups[matcher]) {
       matcherGroups[matcher] = [];
     }
-    matcherGroups[matcher].push({ type: 'command', command });
+    const invocation = buildHookInvocation(
+      baseDir,
+      skillsDir,
+      scriptRelPath,
+      context,
+      config.arguments,
+    );
+    matcherGroups[matcher].push(
+      context.platformId === 'claude'
+        ? { type: 'command', command: invocation.command, args: invocation.args }
+        : {
+            type: 'command',
+            command: buildHookCommand(baseDir, skillsDir, scriptRelPath, context, config.arguments),
+          },
+    );
   }
 
   const newEntries: ClaudeCodeHookEntry[] = Object.entries(matcherGroups).map(
@@ -2172,6 +2405,7 @@ export {
   resolveInstalledHookMatcher,
   removeManagedCopilotHookEntries,
   buildHookCommand,
+  buildHookInvocation,
   removeManagedHooksFromJsonFile,
   planSkillDirectoryCopy,
   mergeProjectConfig,

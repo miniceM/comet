@@ -30,6 +30,25 @@ import {
 
 const stateScript = path.resolve('assets', 'skills', 'comet', 'scripts', 'comet-state.mjs');
 
+type DoctorHook = { type?: string; command?: string; args?: unknown };
+
+function readDoctorHooks(settings: {
+  hooks: { PreToolUse: Array<{ hooks: DoctorHook[] }> };
+}): DoctorHook[] {
+  return settings.hooks.PreToolUse.flatMap((group) => group.hooks);
+}
+
+function hookIncludesScript(hook: DoctorHook, scriptName: string): boolean {
+  return (
+    hook.command?.includes(scriptName) === true ||
+    (Array.isArray(hook.args) &&
+      hook.args.some(
+        (argument): argument is string =>
+          typeof argument === 'string' && argument.includes(scriptName),
+      ))
+  );
+}
+
 async function installManagedCometSkills(baseDir: string, platformDir = '.claude'): Promise<void> {
   const manifest = JSON.parse(
     await fs.readFile(path.resolve('assets', 'manifest.json'), 'utf8'),
@@ -1538,21 +1557,16 @@ describe('doctor command', () => {
       log.mockRestore();
     }
 
-    const settings = JSON.parse(await fs.readFile(hookPath, 'utf8'));
-    const commands = settings.hooks.PreToolUse.flatMap(
-      (group: { hooks: Array<{ command?: string }> }) =>
-        group.hooks.map((hook: { command?: string }) => hook.command),
-    );
+    const settings = JSON.parse(await fs.readFile(hookPath, 'utf8')) as {
+      hooks: { PreToolUse: Array<{ hooks: DoctorHook[] }> };
+    };
+    const hooks = readDoctorHooks(settings);
     expect(
-      commands.filter((command: string) => command?.includes('comet-enterprise-gateway.mjs')),
+      hooks.filter((hook) => hookIncludesScript(hook, 'comet-enterprise-gateway.mjs')),
     ).toHaveLength(1);
-    expect(commands.some((command: string) => command?.includes('comet-hook-router.mjs'))).toBe(
-      false,
-    );
-    expect(commands.some((command: string) => command?.includes('comet-enterprise-hook.mjs'))).toBe(
-      false,
-    );
-    expect(commands).toContain('node user-hook.mjs');
+    expect(hooks.some((hook) => hookIncludesScript(hook, 'comet-hook-router.mjs'))).toBe(false);
+    expect(hooks.some((hook) => hookIncludesScript(hook, 'comet-enterprise-hook.mjs'))).toBe(false);
+    expect(hooks).toContainEqual({ type: 'command', command: 'node user-hook.mjs' });
 
     const after = await collectDoctorResults(tmpDir);
     expect(
@@ -1618,21 +1632,16 @@ describe('doctor command', () => {
       ),
     );
 
-    const settings = JSON.parse(await fs.readFile(hookPath, 'utf8'));
-    const commands = settings.hooks.PreToolUse.flatMap(
-      (group: { hooks: Array<{ command?: string }> }) =>
-        group.hooks.map((hook: { command?: string }) => hook.command),
-    );
+    const settings = JSON.parse(await fs.readFile(hookPath, 'utf8')) as {
+      hooks: { PreToolUse: Array<{ hooks: DoctorHook[] }> };
+    };
+    const hooks = readDoctorHooks(settings);
     expect(
-      commands.filter((command: string) => command?.includes('comet-enterprise-gateway.mjs')),
+      hooks.filter((hook) => hookIncludesScript(hook, 'comet-enterprise-gateway.mjs')),
     ).toHaveLength(1);
-    expect(commands.some((command: string) => command?.includes('comet-hook-router.mjs'))).toBe(
-      false,
-    );
-    expect(commands.some((command: string) => command?.includes('comet-enterprise-hook.mjs'))).toBe(
-      false,
-    );
-    expect(commands).toContain('node user-hook.mjs');
+    expect(hooks.some((hook) => hookIncludesScript(hook, 'comet-hook-router.mjs'))).toBe(false);
+    expect(hooks.some((hook) => hookIncludesScript(hook, 'comet-enterprise-hook.mjs'))).toBe(false);
+    expect(hooks).toContainEqual({ type: 'command', command: 'node user-hook.mjs' });
   });
 
   it('detects and repairs an outdated Enterprise Gateway runtime', async () => {
@@ -1746,14 +1755,23 @@ describe('doctor command', () => {
     const hookPath = path.join(tmpDir, '.claude', 'settings.local.json');
     const settings = JSON.parse(await fs.readFile(hookPath, 'utf8'));
     const router = settings.hooks.PreToolUse[0].hooks[0];
-    settings.hooks.PreToolUse[0].hooks.push(
-      { ...router },
-      {
-        type: 'command',
-        command: router.command.replace('comet-hook-router.mjs', 'comet-hook-guard.mjs'),
-      },
-      { type: 'command', command: 'node user-hook.mjs' },
-    );
+    const legacyGuard = Array.isArray(router.args)
+      ? {
+          type: 'command',
+          command: router.command,
+          args: [
+            router.args[0].replace('comet-hook-router.mjs', 'comet-hook-guard.mjs'),
+            ...router.args.slice(1),
+          ],
+        }
+      : {
+          type: 'command',
+          command: router.command.replace('comet-hook-router.mjs', 'comet-hook-guard.mjs'),
+        };
+    settings.hooks.PreToolUse[0].hooks.push({ ...router }, legacyGuard, {
+      type: 'command',
+      command: 'node user-hook.mjs',
+    });
     await fs.writeFile(hookPath, JSON.stringify(settings), 'utf8');
     const legacyRule = path.join(tmpDir, '.claude', 'rules', 'comet-phase-guard.md');
     await fs.writeFile(legacyRule, '# Legacy\n', 'utf8');
@@ -1765,24 +1783,17 @@ describe('doctor command', () => {
       log.mockRestore();
     }
 
-    const repaired = JSON.parse(await fs.readFile(hookPath, 'utf8'));
-    const commands = repaired.hooks.PreToolUse.flatMap(
-      (group: { hooks: Array<{ command?: string }> }) =>
-        group.hooks.map((hook: { command?: string }) => hook.command),
-    );
+    const repaired = JSON.parse(await fs.readFile(hookPath, 'utf8')) as {
+      hooks: { PreToolUse: Array<{ hooks: DoctorHook[] }> };
+    };
+    const hooks = readDoctorHooks(repaired);
     expect(
-      commands.filter((command: string) => command?.includes('comet-enterprise-gateway.mjs')),
+      hooks.filter((hook) => hookIncludesScript(hook, 'comet-enterprise-gateway.mjs')),
     ).toHaveLength(1);
-    expect(commands.some((command: string) => command?.includes('comet-hook-router.mjs'))).toBe(
-      false,
-    );
-    expect(commands.some((command: string) => command?.includes('comet-enterprise-hook.mjs'))).toBe(
-      false,
-    );
-    expect(commands.some((command: string) => command?.includes('comet-hook-guard.mjs'))).toBe(
-      false,
-    );
-    expect(commands).toContain('node user-hook.mjs');
+    expect(hooks.some((hook) => hookIncludesScript(hook, 'comet-hook-router.mjs'))).toBe(false);
+    expect(hooks.some((hook) => hookIncludesScript(hook, 'comet-enterprise-hook.mjs'))).toBe(false);
+    expect(hooks.some((hook) => hookIncludesScript(hook, 'comet-hook-guard.mjs'))).toBe(false);
+    expect(hooks).toContainEqual({ type: 'command', command: 'node user-hook.mjs' });
     await expect(fs.access(legacyRule)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 

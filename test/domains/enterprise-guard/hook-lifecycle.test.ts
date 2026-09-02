@@ -11,9 +11,11 @@ import {
 } from '../../../domains/enterprise-guard/hook-lifecycle.js';
 import { PLATFORMS } from '../../../platform/install/platforms.js';
 
+type ClaudeHook = { type: string; command: string; args?: string[] };
+
 type ClaudeSettings = {
   hooks: {
-    PreToolUse: Array<{ matcher: string; hooks: Array<{ type: string; command: string }> }>;
+    PreToolUse: Array<{ matcher: string; hooks: ClaudeHook[] }>;
   };
 };
 
@@ -46,8 +48,15 @@ describe('enterprise guard managed Hook lifecycle', () => {
     return JSON.parse(await fs.readFile(settingsPath(), 'utf8')) as ClaudeSettings;
   }
 
-  function readCommands(settings: ClaudeSettings): string[] {
-    return settings.hooks.PreToolUse.flatMap((group) => group.hooks.map((hook) => hook.command));
+  function readHooks(settings: ClaudeSettings): ClaudeHook[] {
+    return settings.hooks.PreToolUse.flatMap((group) => group.hooks);
+  }
+
+  function includesScript(hook: ClaudeHook, scriptName: string): boolean {
+    return (
+      hook.command.includes(scriptName) ||
+      (hook.args ?? []).some((argument) => argument.includes(scriptName))
+    );
   }
 
   function legacyHookCommands(): { routerCommand: string; retiredCommand: string } {
@@ -114,13 +123,13 @@ describe('enterprise guard managed Hook lifecycle', () => {
       status: 'installed',
     });
 
-    const commands = readCommands(await readClaudeSettings());
+    const hooks = readHooks(await readClaudeSettings());
     expect(
-      commands.filter((command) => command.includes('comet-enterprise-gateway.mjs')),
+      hooks.filter((hook) => includesScript(hook, 'comet-enterprise-gateway.mjs')),
     ).toHaveLength(1);
-    expect(commands.some((command) => command.includes('comet-hook-router.mjs'))).toBe(false);
-    expect(commands.some((command) => command.includes('comet-enterprise-hook.mjs'))).toBe(false);
-    expect(commands).toContain('node user-hook.mjs');
+    expect(hooks.some((hook) => includesScript(hook, 'comet-hook-router.mjs'))).toBe(false);
+    expect(hooks.some((hook) => includesScript(hook, 'comet-enterprise-hook.mjs'))).toBe(false);
+    expect(hooks).toContainEqual({ type: 'command', command: 'node user-hook.mjs' });
 
     await expect(inspectEnterpriseGuard(temporaryRoot, claude, 'project')).resolves.toEqual({
       present: true,
@@ -148,13 +157,11 @@ describe('enterprise guard managed Hook lifecycle', () => {
     expect(installSpy).toHaveBeenCalledTimes(2);
     expect(removeSpy).not.toHaveBeenCalled();
 
-    const commands = readCommands(await readClaudeSettings());
-    expect(commands).toContain('node user-hook.mjs');
-    expect(commands.some((command) => command.includes('comet-hook-router.mjs'))).toBe(true);
-    expect(commands.some((command) => command.includes('comet-enterprise-hook.mjs'))).toBe(true);
-    expect(commands.some((command) => command.includes('comet-enterprise-gateway.mjs'))).toBe(
-      false,
-    );
+    const hooks = readHooks(await readClaudeSettings());
+    expect(hooks).toContainEqual({ type: 'command', command: 'node user-hook.mjs' });
+    expect(hooks.some((hook) => includesScript(hook, 'comet-hook-router.mjs'))).toBe(true);
+    expect(hooks.some((hook) => includesScript(hook, 'comet-enterprise-hook.mjs'))).toBe(true);
+    expect(hooks.some((hook) => includesScript(hook, 'comet-enterprise-gateway.mjs'))).toBe(false);
   });
 
   it('reports a repairable state while legacy Hooks coexist with the Gateway', async () => {
@@ -199,13 +206,11 @@ describe('enterprise guard managed Hook lifecycle', () => {
       failed: 0,
     });
 
-    const commands = readCommands(await readClaudeSettings());
-    expect(commands).toContain('node user-hook.mjs');
-    expect(commands.some((command) => command.includes('comet-hook-router.mjs'))).toBe(true);
-    expect(commands.some((command) => command.includes('comet-enterprise-gateway.mjs'))).toBe(
-      false,
-    );
-    expect(commands.some((command) => command.includes('comet-enterprise-hook.mjs'))).toBe(false);
+    const hooks = readHooks(await readClaudeSettings());
+    expect(hooks).toContainEqual({ type: 'command', command: 'node user-hook.mjs' });
+    expect(hooks.some((hook) => includesScript(hook, 'comet-hook-router.mjs'))).toBe(true);
+    expect(hooks.some((hook) => includesScript(hook, 'comet-enterprise-gateway.mjs'))).toBe(false);
+    expect(hooks.some((hook) => includesScript(hook, 'comet-enterprise-hook.mjs'))).toBe(false);
   });
 
   it('reports failure when the legacy Hook cleanup fails after a successful Gateway install', async () => {

@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 
@@ -56,21 +56,30 @@ describe('Comet Hook Router entry', () => {
 
   it('routes an explicit project request and renders an allow decision', async () => {
     vi.mocked(inspectCometHook).mockResolvedValue({ allowed: true, reason: 'allowed' });
+    const projectRoot = await mkdtemp(path.join(tmpdir(), 'comet-hook-router-configured-'));
+    try {
+      await mkdir(path.join(projectRoot, '.comet'), { recursive: true });
+      await writeFile(
+        path.join(projectRoot, '.comet', 'config.yaml'),
+        'schema: comet.project.v1\ndefault_workflow: native\nworkflows: [native]\nnative:\n  artifact_root: docs\n',
+      );
 
-    await expect(
-      runCometHookRouter(['--platform', 'codex', '--project-root', 'project']),
-    ).resolves.toBe(0);
+      await expect(
+        runCometHookRouter(['--platform', 'codex', '--project-root', projectRoot]),
+      ).resolves.toBe(0);
 
-    const projectRoot = path.resolve('project');
-    expect(resolveCometHookProjectRoot).toHaveBeenCalledWith(
-      projectRoot,
-      expect.objectContaining({ intent: 'write', targets: ['src/entry.ts'] }),
-    );
-    expect(inspectCometHook).toHaveBeenCalledWith(
-      projectRoot,
-      expect.objectContaining({ targets: ['src/entry.ts'] }),
-    );
-    expect(stderr).not.toHaveBeenCalled();
+      expect(resolveCometHookProjectRoot).toHaveBeenCalledWith(
+        projectRoot,
+        expect.objectContaining({ intent: 'write', targets: ['src/entry.ts'] }),
+      );
+      expect(inspectCometHook).toHaveBeenCalledWith(
+        projectRoot,
+        expect.objectContaining({ targets: ['src/entry.ts'] }),
+      );
+      expect(stderr).not.toHaveBeenCalled();
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
   });
 
   it('renders a denied decision and exposes the main entry wrapper', async () => {

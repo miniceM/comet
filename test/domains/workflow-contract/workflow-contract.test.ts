@@ -31,6 +31,147 @@ import {
 } from '../../../domains/workflow-contract/project-config-writer.js';
 
 describe('workflow contract normalization', () => {
+  it('normalizes the optional project memory policy with enabled defaults', () => {
+    const withoutMemory = parseWorkflowProjectConfigDocument(
+      [
+        'schema: comet.project.v1',
+        'default_workflow: native',
+        'workflows: [native]',
+        'native:',
+        '  artifact_root: docs',
+        '',
+      ].join('\n'),
+    );
+    expect((withoutMemory.config as unknown as { memory: unknown }).memory).toEqual({
+      learning: true,
+      retrieval: true,
+    });
+
+    const disabled = parseWorkflowProjectConfigDocument(
+      [
+        'schema: comet.project.v1',
+        'default_workflow: native',
+        'workflows: [native]',
+        'memory:',
+        '  learning: false',
+        '  retrieval: true',
+        'native:',
+        '  artifact_root: docs',
+        '',
+      ].join('\n'),
+    );
+    expect((disabled.config as unknown as { memory: unknown }).memory).toEqual({
+      learning: false,
+      retrieval: true,
+    });
+
+    expect(() =>
+      parseWorkflowProjectConfigDocument(
+        [
+          'schema: comet.project.v1',
+          'default_workflow: native',
+          'workflows: [native]',
+          'memory: false',
+          'native:',
+          '  artifact_root: docs',
+          '',
+        ].join('\n'),
+      ),
+    ).toThrow('memory must be a mapping');
+    expect(() =>
+      parseWorkflowProjectConfigDocument(
+        [
+          'schema: comet.project.v1',
+          'default_workflow: native',
+          'workflows: [native]',
+          'memory:',
+          '  learning: yes',
+          'native:',
+          '  artifact_root: docs',
+          '',
+        ].join('\n'),
+      ),
+    ).toThrow('memory.learning must be true or false');
+  });
+
+  it('includes memory policy in managed config writes without dropping extensions', () => {
+    const parsed = parseWorkflowProjectConfigDocument(
+      [
+        'schema: comet.project.v1',
+        'default_workflow: native',
+        'workflows: [native]',
+        'native:',
+        '  artifact_root: docs',
+        'extension:',
+        '  keep: true',
+        '',
+      ].join('\n'),
+    );
+    const config = {
+      ...parsed.config!,
+      memory: { learning: false, retrieval: true },
+    };
+    const merged = mergeWorkflowProjectConfigDocument(parsed.value, config);
+
+    expect(merged.memory).toEqual({ learning: false, retrieval: true });
+    expect(merged.extension).toEqual({ keep: true });
+  });
+
+  it('normalizes and round-trips custom local project knowledge include patterns', () => {
+    const parsed = parseWorkflowProjectConfigDocument(
+      [
+        'schema: comet.project.v1',
+        'default_workflow: native',
+        'workflows: [native]',
+        'knowledge:',
+        '  provider: local',
+        '  local:',
+        '    include:',
+        '      - docs/architecture/**/*.md',
+        '      - docs/architecture/**/*.md',
+        '      - packages/*/README.MD',
+        'native:',
+        '  artifact_root: docs',
+        '',
+      ].join('\n'),
+    );
+
+    expect(parsed.config?.knowledge).toEqual({
+      provider: 'local',
+      local: { include: ['docs/architecture/**/*.md', 'packages/*/README.MD'] },
+    });
+    expect(mergeWorkflowProjectConfigDocument(parsed.value, parsed.config!).knowledge).toEqual({
+      provider: 'local',
+      local: { include: ['docs/architecture/**/*.md', 'packages/*/README.MD'] },
+    });
+  });
+
+  it.each([
+    ['absolute', '/docs/**/*.md'],
+    ['parent traversal', '../docs/**/*.md'],
+    ['backslash', 'docs\\**\\*.md'],
+    ['empty', ''],
+    ['non-markdown', 'docs/**/*.txt'],
+  ])('rejects unsafe custom knowledge include pattern: %s', (_label, pattern) => {
+    expect(() =>
+      parseWorkflowProjectConfigDocument(
+        [
+          'schema: comet.project.v1',
+          'default_workflow: native',
+          'workflows: [native]',
+          'knowledge:',
+          '  provider: local',
+          '  local:',
+          '    include:',
+          pattern.includes('\\') ? `      - ${pattern}` : `      - "${pattern}"`,
+          'native:',
+          '  artifact_root: docs',
+          '',
+        ].join('\n'),
+      ),
+    ).toThrow(/knowledge\.local\.include\[0\]/u);
+  });
+
   it('normalizes project-local Hook allow paths and rejects unsafe paths', () => {
     const parsed = parseWorkflowProjectConfigDocument(
       [

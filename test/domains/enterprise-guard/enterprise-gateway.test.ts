@@ -1,6 +1,19 @@
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { executeEnterpriseGateway } from '../../../domains/enterprise-guard/enterprise-gateway.js';
+
+async function createCometProject(): Promise<string> {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'comet-enterprise-gateway-'));
+  await fs.mkdir(path.join(projectRoot, '.comet'), { recursive: true });
+  await fs.writeFile(
+    path.join(projectRoot, '.comet', 'config.yaml'),
+    'schema: comet.project.v1\ndefault_workflow: native\nworkflows: [native]\nnative:\n  artifact_root: docs\n',
+  );
+  return projectRoot;
+}
 
 describe('Enterprise Guard composite gateway', () => {
   it('short-circuits Router when Enterprise Guard denies', async () => {
@@ -16,16 +29,21 @@ describe('Enterprise Guard composite gateway', () => {
   });
 
   it('returns Router denial after Guard allows the same raw input', async () => {
-    const output = await executeEnterpriseGateway(
-      ['--platform', 'claude', '--project-root', '/workspace/comet'],
-      JSON.stringify({
-        cwd: '/workspace/comet',
-        tool_name: 'Write',
-        tool_input: { file_path: 'openspec/changes/demo/tasks.md', content: '- [x] task' },
-      }),
-      { inspectRouter: vi.fn().mockResolvedValue({ allowed: false, reason: 'phase denied' }) },
-    );
-    expect(output).toEqual({ exitCode: 2, stdout: '', stderr: 'phase denied\n' });
+    const projectRoot = await createCometProject();
+    try {
+      const output = await executeEnterpriseGateway(
+        ['--platform', 'claude', '--project-root', projectRoot],
+        JSON.stringify({
+          cwd: projectRoot,
+          tool_name: 'Write',
+          tool_input: { file_path: 'openspec/changes/demo/tasks.md', content: '- [x] task' },
+        }),
+        { inspectRouter: vi.fn().mockResolvedValue({ allowed: false, reason: 'phase denied' }) },
+      );
+      expect(output).toEqual({ exitCode: 2, stdout: '', stderr: 'phase denied\n' });
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
   });
 
   it('denies HARD input without a Comet project', async () => {
@@ -87,23 +105,28 @@ describe('Enterprise Guard composite gateway', () => {
   });
 
   it('allows safe PreToolUse input through the Router', async () => {
+    const projectRoot = await createCometProject();
     const inspectRouter = vi
       .fn()
       .mockResolvedValue({ allowed: true, reason: 'allowed by workflow' });
-    const output = await executeEnterpriseGateway(
-      ['--platform', 'claude', '--project-root', '/workspace/comet'],
-      JSON.stringify({
-        hook_event_name: 'PreToolUse',
-        tool_name: 'Write',
-        tool_input: { file_path: 'src/config.ts', content: 'export const port = 3000;' },
-      }),
-      { inspectRouter },
-    );
-    expect(output).toEqual({ exitCode: 0, stdout: '', stderr: '' });
-    expect(inspectRouter).toHaveBeenCalledWith(
-      '/workspace/comet',
-      expect.objectContaining({ intent: 'write', targets: ['src/config.ts'] }),
-    );
+    try {
+      const output = await executeEnterpriseGateway(
+        ['--platform', 'claude', '--project-root', projectRoot],
+        JSON.stringify({
+          hook_event_name: 'PreToolUse',
+          tool_name: 'Write',
+          tool_input: { file_path: 'src/config.ts', content: 'export const port = 3000;' },
+        }),
+        { inspectRouter },
+      );
+      expect(output).toEqual({ exitCode: 0, stdout: '', stderr: '' });
+      expect(inspectRouter).toHaveBeenCalledWith(
+        projectRoot,
+        expect.objectContaining({ intent: 'write', targets: ['src/config.ts'] }),
+      );
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
   });
 
   it('denies oversized raw input instead of discarding policy context', async () => {
@@ -173,16 +196,21 @@ describe('Enterprise Guard composite gateway', () => {
   });
 
   it('fails closed when Router inspection rejects', async () => {
-    const output = await executeEnterpriseGateway(
-      ['--platform', 'claude', '--project-root', '/workspace/comet'],
-      JSON.stringify({
-        tool_name: 'Write',
-        tool_input: { file_path: 'src/config.ts', content: 'export const port = 3000;' },
-      }),
-      { inspectRouter: vi.fn().mockRejectedValue(new Error('inspection failed')) },
-    );
-    expect(output.exitCode).toBe(2);
-    expect(output.stderr).toContain('Comet Hook Router failed closed during project discovery');
+    const projectRoot = await createCometProject();
+    try {
+      const output = await executeEnterpriseGateway(
+        ['--platform', 'claude', '--project-root', projectRoot],
+        JSON.stringify({
+          tool_name: 'Write',
+          tool_input: { file_path: 'src/config.ts', content: 'export const port = 3000;' },
+        }),
+        { inspectRouter: vi.fn().mockRejectedValue(new Error('inspection failed')) },
+      );
+      expect(output.exitCode).toBe(2);
+      expect(output.stderr).toContain('Comet Hook Router failed closed during project discovery');
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
   });
 
   it('fails closed when Enterprise Guard evaluation rejects', async () => {

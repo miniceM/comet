@@ -33,6 +33,8 @@ Tweak 是 Comet 五阶段能力的预设工作流，不是独立的平行流程�
 
 恢复已有 tweak change 时，第一项状态操作必须是 `comet state select <change-name>`；创建新 change 时，在 `.comet.yaml` 初始化成功后立即运行该命令，再进入源码写入步骤。
 
+进入 tweak 工作区并读取当前状态 `phase` 后，运行 `comet task <project-root> --task "<用户原始请求>" --phase "<phase>" --session "<本次任务稳定标识>" --json`。只注入返回的 `text`；Context Manifest（`manifest` / `<context_manifest>`）只含摘要、应用原因和稳定 ID，需要正文、来源或验证方式时增加 `--expand-context "<id>"`，路径、操作或阶段变化时以同一 `--session` 重新选择。用户明确要求长期记住时调用 `comet memory remember ... --scope global|project`；仅对隐式但可复用的稳定协作方式调用 `comet memory observe`，不得保存任务摘要、进展、命令输出或测试结果。实际使用条目且结果明确后，用 `applications[].applicationId`（Hook 文本中的 `application_id`）运行 `comet task <project-root> --task "<用户原始请求>" --application "<application-id>" --outcome used-successfully|ignored|overridden|corrected|contributed-to-failure --json`。任务结束仍运行带 `--complete --workflow <workflow> --change <change-id>` 的 `comet task`。无 Hook 时由本 Skill 使用相同接口，`comet memory context` 只作为兼容入口；插件失败不阻断变更。
+
 ### 1. 快速开启（预设 open）
 
 复用 Comet open 能力创建 change，但使用 tweak 默认值：不执行 `openspec-explore` 长探索，直接进入精简 change 创建。
@@ -155,7 +157,7 @@ Tweak 流程默认 **一次性连续执行**。调用 `/comet-tweak` 后，agent
 
 1. 遇到升级判定信号（见「升级判定」章节），**必须暂停、展示选择并等待用户明确选择**：继续 tweak 轻量流程，还是升级为完整 `/comet-classic` 流程
 2. 验证阶段（comet-verify）接受 WARNING/SUGGESTION 偏差、处理 Spec 漂移或超过自动修复上限后的策略决策；前 3 次明确可修复失败自动闭环
-3. 归档前最终确认，以及归档提交后的分支处理决策
+3. 归档前在一个最终确认中选择是否归档及归档提交的交付方式
 
 执行顺序：快速开启 → 构建（含升级判定检查）→ 验证 → 归档 → 完成
 

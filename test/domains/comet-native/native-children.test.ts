@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { nativeArchiveCommand } from '../../../domains/comet-native/native-archive-command.js';
 import {
   hashNativeParentContract,
+  hasNativeSupervisorShapeIntent,
+  findNativeV1SupervisorParents,
   inspectNativeChildren,
   parseNativeChildrenContract,
 } from '../../../domains/comet-native/native-children.js';
@@ -29,6 +31,7 @@ import {
   dispatchNativePortableVerifier,
   executeNativePortableCheckPlan,
   nativePortableChangeDir,
+  readNativePortableChange,
   submitNativePortableBuilderCandidate,
   submitNativePortableVerifierResult,
 } from '../../../domains/comet-native/native-portable-runtime.js';
@@ -149,6 +152,11 @@ async function verifyChild(options: {
       candidateId,
       summary: 'Implemented the child behavior.',
       addressedAcceptanceIds: options.state.acceptance.map(({ id }) => id),
+      review: {
+        status: 'passed',
+        summary: 'Independent child review passed.',
+        reviewerExecutionRef: `${name}-reviewer`,
+      },
     },
   });
   const executed = await executeNativePortableCheckPlan({ paths, name, plans: [] });
@@ -306,6 +314,57 @@ children:
     }
   });
 
+  it('recognizes an explicit Supervisor split in Decisions before children.yaml exists', () => {
+    expect(
+      hasNativeSupervisorShapeIntent(`# Decisions
+
+- Selected Supervisor Change for two independent outcomes.
+- Child 1 owns the first outcome; Child 2 owns the second outcome.
+
+# Verification expectations
+- Run focused checks.
+`),
+    ).toBe(true);
+    expect(
+      hasNativeSupervisorShapeIntent(`# Decisions
+
+- Keep this as one Native Change.
+- The implementation has two related parts.
+`),
+    ).toBe(false);
+  });
+
+  it('parses children.v2 summaries without acceptance ownership fields', () => {
+    const parsed = parseNativeChildrenContract(`
+schema: comet.native.children.v2
+children:
+  - name: integration-core
+    summary: Owns the parent integration branch.
+    depends_on: []
+  - name: dashboard
+    summary: Connects the read-only status view.
+    depends_on: [integration-core]
+`);
+
+    expect(parsed).toEqual({
+      schema: 'comet.native.children.v2',
+      children: [
+        {
+          name: 'integration-core',
+          summary: 'Owns the parent integration branch.',
+          depends_on: [],
+          covers: [],
+        },
+        {
+          name: 'dashboard',
+          summary: 'Connects the read-only status view.',
+          depends_on: ['integration-core'],
+          covers: [],
+        },
+      ],
+    });
+  });
+
   it('accepts a readable v2 acceptance index while retaining the v1 contract', () => {
     const acceptance = [
       { id: 'A1', source: 'brief.md', text: 'The integrated result contains the first behavior.' },
@@ -336,6 +395,50 @@ children:
     });
   });
 
+  it('rejects mixed v2 child-plan variants with an actionable format error', () => {
+    const indexedWithSummary = READABLE_CHILDREN.replace(
+      'depends_on: []\n    covers: [A1]',
+      'summary: Owns the first behavior.\n    depends_on: []',
+    );
+    expect(() => parseNativeChildrenContract(indexedWithSummary, ['A1', 'A2'])).toThrow(
+      /indexed v2 child .*fields are invalid: missing covers; unexpected summary; expected name, depends_on, covers/iu,
+    );
+
+    const summaryWithCovers = `
+schema: comet.native.children.v2
+children:
+  - name: integration-core
+    summary: Owns the parent integration branch.
+    depends_on: []
+    covers: [A1]
+    `;
+    expect(() => parseNativeChildrenContract(summaryWithCovers)).toThrow(
+      /summary v2 child .*fields are invalid: unexpected covers; expected name, summary, depends_on/iu,
+    );
+  });
+
+  it('explains the acceptance index mapping and entry fields', () => {
+    expect(() =>
+      parseNativeChildrenContract(
+        READABLE_CHILDREN.replace(
+          /acceptance_index:[\s\S]*?children:/u,
+          'acceptance_index: []\nchildren:',
+        ),
+        ['A1', 'A2'],
+      ),
+    ).toThrow(
+      'acceptance_index must be an object keyed by acceptance ID, for example A1: { source: brief.md, text: "Full acceptance text" }',
+    );
+    expect(() =>
+      parseNativeChildrenContract(READABLE_CHILDREN.replace('source: brief.md', 'file: brief.md'), [
+        'A1',
+        'A2',
+      ]),
+    ).toThrow(
+      'acceptance_index.A1 fields are invalid: missing source; unexpected file; expected source, text',
+    );
+  });
+
   it('validates v2 index text against the full catalog while requiring only the child-facing subset', () => {
     const acceptance = [
       { id: 'A1', source: 'brief.md', text: 'The integrated result contains the first behavior.' },
@@ -362,7 +465,9 @@ children:
         acceptance.map(({ id }) => id),
         { acceptanceCatalog: acceptance, requiredAcceptanceIds: ['A1', 'A2'] },
       ),
-    ).toThrow(/does not match the acceptance catalog/iu);
+    ).toThrow(
+      /acceptance_index.A2 does not match the acceptance catalog: copy text exactly from the current acceptance catalog/iu,
+    );
     expect(() =>
       parseNativeChildrenContract(
         READABLE_CHILDREN.replace('covers: [A1]', 'covers: [A1, A3]'),
@@ -408,7 +513,8 @@ children:
       ['parent', '--summary', 'Confirm the parent contract', '--confirmed'],
       repository,
     );
-    const parentState = data(parentConfirmed).state!;
+    expect(data(parentConfirmed).state).toMatchObject({ phase: 'build' });
+    const parentState = await readNativePortableChange(parentPaths, 'parent');
     expect(parentState).toMatchObject({
       phase: 'build',
       workspace: { change_branch: 'integration' },
@@ -425,11 +531,7 @@ children:
     await expect(
       inspectNativePortableStatus({ paths: parentPaths, name: 'parent' }),
     ).resolves.toMatchObject({
-      children: [
-        { name: 'child-a', status: 'ready' },
-        { name: 'child-b', status: 'pending' },
-        { name: 'child-c', status: 'ready' },
-      ],
+      childSummary: { total: 3, ready: 2, pending: 1 },
       readyChildren: ['child-a', 'child-c'],
     });
 
@@ -464,6 +566,11 @@ children:
           }),
           summary: 'A parent Builder must not run.',
           addressedAcceptanceIds: parentState.acceptance.map(({ id }) => id),
+          review: {
+            status: 'passed',
+            summary: 'Independent parent review passed.',
+            reviewerExecutionRef: 'parent-reviewer-early',
+          },
         },
       }),
     ).rejects.toThrow(/parent Build advances child changes/iu);
@@ -605,16 +712,89 @@ children:
     git(repository, ['commit', '-m', 'record merged child projections']);
     const allDone = await inspectNativeChildren({ paths: parentPaths, state: parentAfterMerge });
     expect(allDone?.allDone).toBe(true);
+    const discoveredParent = await findNativeV1SupervisorParents({
+      paths: parentPaths,
+      childName: 'child-c',
+      targetBranch: 'integration',
+    });
+    expect(discoveredParent.candidate?.state.name).toBe('parent');
 
+    const pendingParentName = 'parent-pending';
+    const pendingParentDir = nativePortableChangeDir(parentPaths, pendingParentName);
+    await fs.cp(parentDir, pendingParentDir, { recursive: true });
+    const pendingParentState = await readNativePortableState(
+      path.join(pendingParentDir, 'comet-state.yaml'),
+    );
+    pendingParentState.name = pendingParentName;
+    const pendingChildrenSource = `${CHILDREN}  - name: child-pending\n    depends_on: []\n    covers: []\n`;
+    await fs.writeFile(path.join(pendingParentDir, 'children.yaml'), pendingChildrenSource);
+    pendingParentState.children_contract_hash = hashNativeParentContract({
+      acceptance: pendingParentState.acceptance,
+      children: parseNativeChildrenContract(
+        pendingChildrenSource,
+        pendingParentState.acceptance.map(({ id }) => id),
+      ),
+    });
+    await writeNativePortableState(
+      path.join(pendingParentDir, 'comet-state.yaml'),
+      pendingParentState,
+    );
+    const ambiguousParent = await findNativeV1SupervisorParents({
+      paths: parentPaths,
+      childName: 'child-c',
+      targetBranch: 'integration',
+    });
+    expect(ambiguousParent.candidate).toBeNull();
+    expect(ambiguousParent.blockers.join('\n')).toMatch(
+      /multiple active parents|parent-pending is not ready to advance/iu,
+    );
+    pendingParentState.workspace.target_branch = 'other';
+    await writeNativePortableState(
+      path.join(pendingParentDir, 'comet-state.yaml'),
+      pendingParentState,
+    );
+    const mismatchedParent = await findNativeV1SupervisorParents({
+      paths: parentPaths,
+      childName: 'child-c',
+      targetBranch: 'integration',
+    });
+    expect(mismatchedParent.candidate).toBeNull();
+    expect(mismatchedParent.blockers.join('\n')).toMatch(/targets other, not integration/iu);
+    const missingParent = await findNativeV1SupervisorParents({
+      paths: parentPaths,
+      childName: 'unknown-child',
+      targetBranch: 'integration',
+    });
+    expect(missingParent.candidate).toBeNull();
+    expect(missingParent.blockers.join('\n')).toMatch(/no active v1 parent declaring it/iu);
+
+    const parentReviewInput = path.join(repository, 'parent-review-input.json');
+    await fs.writeFile(
+      parentReviewInput,
+      JSON.stringify({
+        kind: 'builder-handoff',
+        summary: 'Reviewed the final integrated parent result.',
+        addressed_acceptance_ids: parentState.acceptance.map(({ id }) => id),
+        checks: [],
+        known_limits: [],
+        review: {
+          status: 'passed',
+          summary: 'Independent parent code review passed.',
+          reviewer_execution_ref: 'parent-reviewer',
+        },
+      }),
+    );
     const integrated = await nativeNextCommand(
-      ['parent', '--summary', 'Verify the final integrated parent result'],
+      ['parent', '--runner-input', parentReviewInput],
       repository,
     );
-    const integratedState = data(integrated).state!;
+    expect(data(integrated).state).toMatchObject({ phase: 'verify' });
+    const integratedState = await readNativePortableChange(parentPaths, 'parent');
     expect(integratedState).toMatchObject({
       phase: 'verify',
       builder_handoff: {
         addressed_acceptance_ids: parentState.acceptance.map(({ id }) => id),
+        review: { reviewer_execution_ref: 'parent-reviewer' },
       },
     });
     expect(integratedState.acceptance.map(({ id, text }) => ({ id, text }))).toEqual(
@@ -690,7 +870,10 @@ children:
       ['parent', '--summary', 'Reorder completed children without repairing'],
       repository,
     );
-    expect(data(bypassAttempt).state).toMatchObject({ phase: 'shape', acceptance: [] });
+    expect(data(bypassAttempt).state).toMatchObject({
+      phase: 'shape',
+      acceptance: { total: 0 },
+    });
     await expect(
       nativeNextCommand(
         ['parent', '--summary', 'Try to reconfirm without a repair child', '--confirmed'],
@@ -708,12 +891,12 @@ children:
       ['parent', '--summary', 'Confirm the repair child plan', '--confirmed'],
       repository,
     );
-    expect(data(replanned).state).toMatchObject({
-      phase: 'build',
+    expect(data(replanned)).toMatchObject({
+      state: { phase: 'build' },
+      readyChildren: ['repair-parent-a1'],
+    });
+    await expect(readNativePortableChange(parentPaths, 'parent')).resolves.toMatchObject({
       children_contract_hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
     });
-    expect(data(replanned).children).toContainEqual(
-      expect.objectContaining({ name: 'repair-parent-a1', status: 'ready' }),
-    );
   }, 120_000);
 });

@@ -37,6 +37,7 @@ const ROOT_KEYS = new Set([
   'state_version',
   'brief',
   'children_contract_hash',
+  'coordination_mode',
   'spec_changes',
   'workspace',
   'loop',
@@ -327,6 +328,7 @@ function parseBuilderHandoff(value: unknown): NativeBuilderHandoff {
       'checks_truncated',
       'known_limits',
       'known_limits_truncated',
+      'review',
       'submitted_at',
     ]),
     label,
@@ -336,6 +338,17 @@ function parseBuilderHandoff(value: unknown): NativeBuilderHandoff {
     `${label}.addressed_acceptance_ids`,
   );
   assertUnique(addressed_acceptance_ids, `${label}.addressed_acceptance_ids`);
+  const review =
+    root.review === null || root.review === undefined
+      ? null
+      : record(root.review, `${label}.review`);
+  if (review) {
+    rejectUnknown(
+      review,
+      new Set(['status', 'summary', 'reviewer_execution_ref']),
+      `${label}.review`,
+    );
+  }
   return {
     candidate_id: stringValue(root.candidate_id, `${label}.candidate_id`),
     identity_provider: stringValue(root.identity_provider, `${label}.identity_provider`),
@@ -355,6 +368,16 @@ function parseBuilderHandoff(value: unknown): NativeBuilderHandoff {
       root.known_limits_truncated,
       `${label}.known_limits_truncated`,
     ),
+    review: review
+      ? {
+          status: enumValue(review.status, ['passed'] as const, `${label}.review.status`),
+          summary: parsePortableText(review.summary, `${label}.review.summary`),
+          reviewer_execution_ref: stringValue(
+            review.reviewer_execution_ref,
+            `${label}.review.reviewer_execution_ref`,
+          ),
+        }
+      : null,
     submitted_at: timestamp(root.submitted_at, `${label}.submitted_at`),
   };
 }
@@ -583,6 +606,12 @@ function assertReferences(state: NativePortableState): void {
     if (!allowedIteration) {
       throw new Error('Native builder handoff iteration is not current or the prior repair result');
     }
+    if (
+      state.builder_handoff.review?.reviewer_execution_ref ===
+      state.builder_handoff.builder_execution_ref
+    ) {
+      throw new Error('Native reviewer execution ref must differ from the Builder execution ref');
+    }
   }
   if (state.verification) {
     if (!state.builder_handoff) throw new Error('Native verification requires a builder handoff');
@@ -734,6 +763,15 @@ export function parseNativePortableState(value: unknown): NativePortableState {
           children_contract_hash: hashValue(
             root.children_contract_hash,
             'Native children contract hash',
+          ),
+        }),
+    ...(root.coordination_mode === undefined
+      ? {}
+      : {
+          coordination_mode: enumValue(
+            root.coordination_mode,
+            ['multi-session', 'single-session'] as const,
+            'Native coordination mode',
           ),
         }),
     spec_changes,
