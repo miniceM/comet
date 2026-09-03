@@ -65,7 +65,7 @@
 - **复杂需求的 Supervisor Change** — Native 可以按真实交付边界拆分子 Change，用 DAG 管理依赖与就绪顺序，让多个 Agent 在 Runtime 创建的独立 worktree 中实现和验证，再统一集成并对父 Change 做最终验收。
 - **长程任务稳定的核心**— Comet 的 Classic Spec 模式结合 OpenSpec 和 Superpowers，用状态机、阶段检查与脚本串联五阶段流程，适合需要明确方法和强约束的任务；永久入口是 `/comet-classic`。
 - **配置驱动的统一入口** — `/comet` 只读取项目的 `.comet/config.yaml`，确定性转发到 `/comet-native` 或 `/comet-classic`。它不按任务大小猜工作流，也不混用两边的 change、状态和目录。`comet resume-probe` 使用同一配置恢复正确的永久入口。
-- **Claude Code 本地 Enterprise Guard** — `comet init` 与 `comet update` 安装单一受管 `PreToolUse` Gateway，在 Comet 工作流路由之前检查高风险写入、凭据、递归删除和强制推送，并在策略或审计不可用时拒绝执行。由于同级 Hook 并行且互相不可见，当前覆盖属于尽力阻断并继续要求 CI 兜底；详见[平台覆盖能力报告](docs/architecture/enterprise-guard/platform-coverage.md)。
+- **Claude Code 与 OpenCode 本地 Enterprise Guard** — `comet init` 与 `comet update` 为 Claude Code 安装单一受管 `PreToolUse` Gateway，为 OpenCode 安装受管插件桥和 Runner，在 Comet 工作流路由之前检查高风险写入、凭据、递归删除和强制推送，并在策略或审计不可用时拒绝执行。由于同级 Hook/插件并行且互相不可见，当前覆盖属于尽力阻断并继续要求 CI 兜底；详见[平台覆盖能力报告](docs/architecture/enterprise-guard/platform-coverage.md)。
 - **Skill 平台** — Comet能够编写可复用 Skill 包，并通过 `/comet-any` 把它们整理成可分发 Bundle，你制作的Skill可以像如comet init一样一键分发到所有Coding平台。
 - **Eval 平台**— Comet基于科学的Rubric、Pass@k、Pass^k评分评估你的Skill，让Skill演进是基于科学依据，而不是依靠感觉，支持接入LangSmith评估，让评估真实走进企业级生产环境。基于双Agent架构自动化在你的生产环境完成评估工作
 
