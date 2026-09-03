@@ -126,6 +126,13 @@ describe('Enterprise Guard input codecs', () => {
       path: { value: 'src/index.ts' },
       fragment: { value: '+++ b/src/index.ts\n' },
     });
+
+    const del = parseEnterpriseGuardInput(
+      'opencode',
+      JSON.stringify({ tool: 'delete', tool_input: { file_path: 'src/index.ts' } }),
+    );
+    expect(del.writes[0]).toMatchObject({ operation: 'delete' });
+    expect(del.writes[0].path.value).toBe('src/index.ts');
   });
 
   it('abstains only for a known read-only OpenCode tool', () => {

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { enterpriseGuardPlatformProfile } from '../../../domains/enterprise-guard/platform-profiles.js';
 import {
   enterpriseGuardCoverage,
+  hasManagedEntry,
   isEnterpriseGuardEnforcedPlatform,
   usesEnterpriseGuardGateway,
   usesEnterpriseGuardPlugin,
@@ -105,5 +106,8 @@ describe('Enterprise Guard platform coverage', () => {
     });
     expect(isEnterpriseGuardEnforcedPlatform({ id: 'opencode' })).toBe(false);
     expect(usesEnterpriseGuardPlugin({ id: 'opencode' })).toBe(true);
+    expect(hasManagedEntry({ id: 'opencode' })).toBe(true);
+    expect(hasManagedEntry({ id: 'claude' })).toBe(true);
+    expect(hasManagedEntry({ id: 'codex' })).toBe(false);
   });
 });

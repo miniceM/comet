@@ -31,11 +31,18 @@ function claudeToolName(value: string | null): string | null {
   }
 }
 
+const OPENCODE_DELETE_TOOLS = new Set(['delete', 'remove', 'erase']);
+
+function isDeleteTool(toolName: string | null): boolean {
+  return toolName !== null && OPENCODE_DELETE_TOOLS.has(toolName.toLowerCase());
+}
+
 function writeOperation(
   toolName: string | null,
 ): EnterpriseHookInput['writes'][number]['operation'] {
   if (toolName === 'Write') return 'create';
   if (toolName === 'Edit') return 'edit';
+  if (isDeleteTool(toolName)) return 'delete';
   return 'unknown';
 }
 
@@ -95,10 +102,9 @@ export function parseOpenCodePluginInput(source: string): EnterpriseHookInput {
     !isWriteTool(mutableToolName) &&
     !isKnownCommandTool &&
     !isReadOnlyTool &&
-    parse.status === 'complete' &&
-    true;
+    parse.status === 'complete';
   const writes =
-    isWriteTool(mutableToolName) || isMutatingUnknown
+    isWriteTool(mutableToolName) || isMutatingUnknown || isDeleteTool(mutableToolName)
       ? [{ operation: writeOperation(mutableToolName), path: pathValue, fragment: fragmentValue }]
       : [];
   for (const [index, write] of writes.entries()) {

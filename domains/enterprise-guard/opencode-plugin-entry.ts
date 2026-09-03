@@ -4,11 +4,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parseOpenCodeRunnerDecision } from './decision-codecs/opencode.js';
+import { OPENCODE_PLUGIN_MARKER } from './hook-lifecycle.js';
 
 const RUNNER_TIMEOUT_MS = 10_000;
 const INSTALLED_RUNNER_RELATIVE_PATH = '../skills/comet/scripts/comet-enterprise-runner.mjs';
 const PUBLISHED_RUNNER_RELATIVE_PATH = '../scripts/comet-enterprise-runner.mjs';
-const MANAGED_MARKER = 'comet.enterprise-managed-opencode-guard.v1';
+const PLATFORM = 'opencode';
 
 type OpenCodePluginContext = {
   directory?: unknown;
@@ -51,7 +52,7 @@ function runRunner(payload: string): Promise<{ code: number; stdout: string; std
     let settled = false;
     let stdout = '';
     let stderr = '';
-    const child = spawn(nodeExecutablePath(), [runnerPath(), '--platform', 'opencode'], {
+    const child = spawn(nodeExecutablePath(), [runnerPath(), '--platform', PLATFORM], {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
@@ -85,7 +86,7 @@ function failClosed(reason: string): never {
 
 /** Thin host bridge: normalize, invoke the managed Runner, and deny by throwing. */
 export const CometEnterpriseGuardPlugin = async (context?: OpenCodePluginContext) => ({
-  [MANAGED_MARKER]: true,
+  [OPENCODE_PLUGIN_MARKER]: true,
   'tool.execute.before': async (input: OpenCodeHookInput, output: OpenCodeHookOutput) => {
     const payload = JSON.stringify({
       hook_event_name: 'tool.execute.before',
