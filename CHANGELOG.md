@@ -6,6 +6,7 @@ All notable changes to @rpamis/comet will be documented in this file.
 
 ### Added
 
+- **Enterprise Guard managed runtime and integrity verification**: Enterprise Gateway, Runner, and platform plugin bridges now install into a versioned, tamper-evident managed runtime directory with manifest schema validation and sha256 checksums. Updates write and verify new runtime versions before atomically switching active pointers, and doctor inspects file digests, permissions, protocol compatibility, tool coverage, and deduplication.
 - **Enterprise Guard for OpenCode**: `comet init` and `comet update` now install an auto-discovered managed OpenCode plugin bridge and Runner. Bash commands are evaluated before execution to block high-risk operations such as embedded credentials or private keys, filesystem-root recursive deletion, and force-push commands. `comet doctor --repair` restores missing or outdated managed files, while uninstall removes only Comet-owned files and preserves user plugins and configuration.
 - **Enterprise Guard Gateway protocol suite**: Extended the unified Composite Gateway across verified command-hook platforms (Codex, Amazon Q Developer, Qwen Code, Gemini CLI, GitHub Copilot, Trae, Trae CN, Oh My Pi, DeepSeek Harness) with dedicated input codecs, secondary deserialization, and decision rendering, automatically retiring legacy dual Hooks while preserving user custom configurations.
 - **Enterprise Guard for Claude Code**: `comet init` and `comet update` now install one managed `PreToolUse` Gateway that evaluates high-risk writes, embedded credentials or private keys, filesystem-root recursive deletion, and force-push commands before Comet workflow routing. Guard evaluation and required audit persistence fail closed, `comet doctor --repair` restores missing project or user-local runtimes before retiring legacy Hooks, uninstall preserves user entries, and coverage reports peer-Hook ordering limits as best-effort with CI fallback.
@@ -14,6 +15,7 @@ All notable changes to @rpamis/comet will be documented in this file.
 
 ### Changed
 
+- **Enterprise Guard repair and uninstall boundaries**: `comet doctor --repair` restores corrupted, missing, outdated, or duplicate managed files through atomic switch semantics, while `uninstall` strictly purges only managed runtime artifacts matching registered digests, preserving user custom hooks, third-party plugins, and audit findings.
 - **Enterprise Guard platform profiles and lifecycle**: Generalised hook lifecycle management to discover platform profiles dynamically, supporting multi-platform composite gateway installation, inspection, and idempotent cleanup across supported toolsets.
 - **Enterprise Guard policy contract**: Claude Guard evaluation now emits versioned per-rule results for bounded write and shell inspection, fails closed on incomplete input, supports time-bounded approved exceptions, and verifies source, contract, and published runtime alignment in CI.
 

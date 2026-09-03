@@ -70,6 +70,7 @@
     }
   },
   "enterpriseGuardRuntime": {
+    "manifest": "assets/skills/comet/enterprise-guard-manifest.json",
     "entries": {
       "gateway": "domains/enterprise-guard/enterprise-gateway-entry.ts",
       "runner": "domains/enterprise-guard/enterprise-runner-entry.ts",

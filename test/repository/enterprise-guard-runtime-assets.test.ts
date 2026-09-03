@@ -34,6 +34,7 @@ describe('enterprise guard release asset', () => {
     expect(manifest.skills).toContain('comet/scripts/comet-enterprise-gateway.mjs');
     expect(manifest.skills).toContain('comet/scripts/comet-enterprise-runner.mjs');
     expect(manifest.skills).toContain('comet/plugins/comet-enterprise-guard.mjs');
+    expect(manifest.skills).toContain('comet/enterprise-guard-manifest.json');
     expect(manifest.skills).not.toContain('comet/scripts/comet-enterprise-hook.mjs');
     const source = await fs.readFile(generatedGateway, 'utf8');
 
@@ -41,6 +42,31 @@ describe('enterprise guard release asset', () => {
     expect(source).toContain('comet.enterprise-hook-input.v1');
     expect(source).toContain('No Comet project discovered');
     expect(source).not.toContain('comet-hook-router.mjs');
+
+    const manifestFile = path.resolve(
+      'assets',
+      'skills',
+      'comet',
+      'enterprise-guard-manifest.json',
+    );
+    const runtimeManifest = JSON.parse(await fs.readFile(manifestFile, 'utf8'));
+    const manifestZhFile = path.resolve(
+      'assets',
+      'skills-zh',
+      'comet',
+      'enterprise-guard-manifest.json',
+    );
+    const runtimeZhManifest = JSON.parse(await fs.readFile(manifestZhFile, 'utf8'));
+    expect(runtimeZhManifest).toEqual(runtimeManifest);
+
+    expect(runtimeManifest.schemaVersion).toBe(1);
+    expect(runtimeManifest.version).toBe(manifest.version);
+    expect(runtimeManifest.rules).toContain('EG-HARD-INPUT-001');
+    expect(runtimeManifest.rules).toContain('EG-HARD-GIT-001');
+    expect(runtimeManifest.files.gateway.fileName).toBe('comet-enterprise-gateway.mjs');
+    expect(runtimeManifest.files.runner.fileName).toBe('comet-enterprise-runner.mjs');
+    expect(runtimeManifest.files.opencodePlugin.fileName).toBe('comet-enterprise-guard.mjs');
+
     execFileSync(process.execPath, [builder, '--check'], { stdio: 'pipe' });
   });
 

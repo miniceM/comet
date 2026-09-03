@@ -1,6 +1,6 @@
 # Enterprise Guard 覆盖能力报告
 
-> 版本：v1.5 · 最后更新：2026-09-03 · 对应 [Issue #14](https://github.com/miniceM/yuan-comet/issues/14)、[Issue #15](https://github.com/miniceM/comet/issues/15)、[Issue #5](https://github.com/miniceM/comet/issues/5)
+> 版本：v1.6 · 最后更新：2026-09-03 · 对应 [Issue #17](https://github.com/miniceM/yuan-comet/issues/17)、[Issue #14](https://github.com/miniceM/yuan-comet/issues/14)、[Issue #15](https://github.com/miniceM/comet/issues/15)、[Issue #5](https://github.com/miniceM/comet/issues/5)
 
 ## 结论
 
@@ -41,7 +41,12 @@ OpenCode 的本地 Guard 由自动发现的 `comet-enterprise-guard.js` 薄插�
 
 ## Doctor 与生命周期
 
-`comet doctor` 会为每个已检测到的 Hook 平台显示对应覆盖等级。Claude 只检查单一受管 Enterprise Gateway：健康时报告 “exactly one managed Enterprise Gateway present”，并把过期 runtime、缺失、重复与遗留双 Hook 条目归类诊断，由 `comet doctor --repair` 修复或幂等迁移为 Gateway 单条目。OpenCode 检查受管 `.js` 插件桥和 Runner 的完整性、过期状态与重复插件。其余平台显示预期的规则注入 + CI 兜底状态，不会安装或移除 Enterprise Guard Hook。`comet init`、`comet update`、`comet doctor --repair` 与 `comet uninstall` 只管理各自的受管入口，并始终保留用户 Hook、插件和配置；此前安装的 Claude Enterprise Hook 与 Router 双条目会在安装或更新时迁移为单一 Gateway。
+Enterprise Gateway、Runner 和插件桥升级为受管 Runtime（`~/.comet/enterprise-guard/`）：
+
+- **版本化存储与原子切换**：安装与更新流程先在隔离的临时版本目录中完整写入并通过 sha256 校验，再原子重命名进入版本目录（`versions/<version>/`），并原子更新当前指针 `current.json`，防止网络中断或写入异常导致半写入损坏；
+- **Doctor 巡检**：`comet doctor` 覆盖七维检查（条目唯一性、目标脚本存在性、sha256 摘要一致性、可执行权限、schemaVersion 协议版本、工具覆盖和排序保证）；
+- **`doctor --repair` 与 `uninstall` 边界**：`--repair` 幂等修复缺失、过期、损坏或摘要不匹配的受管条目和文件；`uninstall` 仅移除带有受管标记且路径/摘要匹配的对象，完整保留用户自定义 Hook、第三方插件、项目业务文件和 `.comet/enterprise-guard/findings.jsonl` 审计记录。其余平台显示预期的规则注入 + CI 兜底状态，不会安装或移除 Enterprise Guard Hook。
+- **平滑兼容**：此前安装的 Claude Enterprise Hook 与 Router 双条目会在安装或更新时迁移为单一 Gateway。
 
 ## 提升覆盖等级
 

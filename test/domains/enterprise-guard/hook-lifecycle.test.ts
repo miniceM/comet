@@ -4,11 +4,14 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  ensureManagedRuntimeReady,
   hookLifecycleDependencies,
   inspectEnterpriseGuard,
   installEnterpriseGuard,
+  readPublishedEnterpriseGuardManifest,
   removeEnterpriseGuard,
 } from '../../../domains/enterprise-guard/hook-lifecycle.js';
+import { inspectManagedRuntime } from '../../../domains/enterprise-guard/managed-runtime.js';
 import { PLATFORMS } from '../../../platform/install/platforms.js';
 
 type ClaudeHook = { type: string; command: string; args?: string[] };
@@ -370,6 +373,49 @@ describe('enterprise guard managed Hook lifecycle', () => {
       await expect(inspectEnterpriseGuard(temporaryRoot, opencode, 'project')).resolves.toEqual({
         present: false,
       });
+    });
+  });
+
+  describe('managed runtime readiness and integrity', () => {
+    it('prepares and activates managed runtime from published release assets', async () => {
+      const storageRoot = path.join(temporaryRoot, 'custom-managed-runtime');
+      const manifest = await readPublishedEnterpriseGuardManifest();
+      expect(manifest.version).toBeDefined();
+      expect(manifest.rules).toContain('EG-HARD-INPUT-001');
+
+      const ready = await ensureManagedRuntimeReady(storageRoot);
+      expect(ready.versionDir).toBe(path.join(storageRoot, 'versions', manifest.version));
+      expect(ready.manifest.version).toBe(manifest.version);
+
+      const pointer = JSON.parse(await fs.readFile(path.join(storageRoot, 'current.json'), 'utf8'));
+      expect(pointer.activeVersion).toBe(manifest.version);
+      expect(pointer.activePath).toBe(ready.versionDir);
+
+      const inspection = await inspectManagedRuntime({
+        storageRoot,
+        expectedVersion: manifest.version,
+      });
+      expect(inspection.status).toBe('healthy');
+      expect(inspection.pointerPresent).toBe(true);
+      expect(inspection.manifestDigestMatch).toBe(true);
+      expect(inspection.filesIntegrityMatch).toBe(true);
+    });
+
+    it('detects tampering when a managed runtime file is corrupted', async () => {
+      const storageRoot = path.join(temporaryRoot, 'custom-managed-runtime-corrupted');
+      const ready = await ensureManagedRuntimeReady(storageRoot);
+
+      // Tamper with gateway
+      const gatewayPath = path.join(ready.versionDir, 'comet-enterprise-gateway.mjs');
+      await fs.writeFile(gatewayPath, 'malicious script replacement', 'utf8');
+
+      const inspection = await inspectManagedRuntime({
+        storageRoot,
+        expectedVersion: ready.manifest.version,
+      });
+      expect(inspection.status).toBe('tampered');
+      expect(inspection.filesIntegrityMatch).toBe(false);
+      expect(inspection.reasons.some((r) => r.includes('sha256 mismatch'))).toBe(true);
     });
   });
 });

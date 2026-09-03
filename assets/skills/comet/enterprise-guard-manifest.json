@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "version": "0.4.0-rc.2",
+  "compatibleCliRange": ">=0.4.0-rc.2",
+  "rules": [
+    "EG-HARD-INPUT-001",
+    "EG-HARD-ENV-001",
+    "EG-HARD-SECRET-001",
+    "EG-HARD-RM-001",
+    "EG-HARD-GIT-001",
+    "EG-HARD-AUDIT-001",
+    "EG-HARD-INTEGRITY-001"
+  ],
+  "files": {
+    "gateway": {
+      "fileName": "comet-enterprise-gateway.mjs",
+      "sha256": "3ba9a578537b9920b9057727c9ac476f5c0a9ffd9b96b80d659f0e6c86ce2d77",
+      "executable": true
+    },
+    "runner": {
+      "fileName": "comet-enterprise-runner.mjs",
+      "sha256": "2988f8d41bae8808c44e82862c3b30e137ef85a6103af765c56c59af53716729",
+      "executable": true
+    },
+    "opencodePlugin": {
+      "fileName": "comet-enterprise-guard.mjs",
+      "sha256": "2c30f70aa02ba7fdb9d587fd9b2911ce4fb740899ddf41cadce22e3adc1caedb",
+      "executable": false
+    }
+  }
+}
