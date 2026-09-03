@@ -56,6 +56,7 @@ describe('repository layout registry', () => {
       path.resolve('assets', 'skills', 'comet', 'scripts', 'comet-entry-runtime.mjs'),
     );
     expect(layout.enterpriseGuardRuntime).toEqual({
+      manifest: 'assets/skills/comet/enterprise-guard-manifest.json',
       entries: {
         gateway: 'domains/enterprise-guard/enterprise-gateway-entry.ts',
         runner: 'domains/enterprise-guard/enterprise-runner-entry.ts',

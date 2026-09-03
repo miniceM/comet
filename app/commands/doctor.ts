@@ -874,6 +874,16 @@ async function checkHookComponents(
     if (!runner) reasons.push('managed Enterprise Guard runner missing');
     else if (!expectedRunner.equals(runner))
       reasons.push('outdated Enterprise Guard runner runtime');
+    if (runner && process.platform !== 'win32') {
+      try {
+        const runnerStat = await fs.stat(runtime.runnerDestination);
+        if ((runnerStat.mode & 0o111) === 0) {
+          reasons.push('managed Enterprise Guard runner is not executable');
+        }
+      } catch {
+        // ignore
+      }
+    }
     if (inspection.duplicatePresent) {
       reasons.push('duplicate managed OpenCode Guard plugins remain');
     }
@@ -920,6 +930,16 @@ async function checkHookComponents(
       reasons.push('managed Enterprise Gateway missing');
     }
     if (outdated) reasons.push('outdated Enterprise Gateway runtime');
+    if (!destinationMissing && process.platform !== 'win32') {
+      try {
+        const gatewayStat = await fs.stat(gatewayRuntime.destination);
+        if ((gatewayStat.mode & 0o111) === 0) {
+          reasons.push('managed Enterprise Gateway runtime is not executable');
+        }
+      } catch {
+        // ignore
+      }
+    }
     if (inspection.duplicatePresent) {
       reasons.push('duplicate managed Enterprise Gateway Hooks remain');
     }

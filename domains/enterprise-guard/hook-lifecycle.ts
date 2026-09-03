@@ -1,3 +1,4 @@
+import { promises as fs } from 'fs';
 import { readFile, readdir } from 'fs/promises';
 import path from 'path';
 
@@ -17,15 +18,72 @@ import {
 } from '../skill/platform-inspect.js';
 import { removeManagedHooksForPlatform, type RemovalResult } from '../skill/uninstall.js';
 import {
+  activateManagedRuntimeVersion,
+  cleanUnusedManagedRuntimeVersions,
+  ENTERPRISE_GUARD_MANIFEST_FILE,
+  type EnterpriseGuardManifest,
+  inspectManagedRuntime,
+  prepareManagedRuntimeVersion,
+} from './managed-runtime.js';
+import {
   enterpriseGuardCoverage,
   usesEnterpriseGuardGateway,
   usesEnterpriseGuardPlugin,
 } from './platform-coverage.js';
 
+export async function readPublishedEnterpriseGuardManifest(): Promise<EnterpriseGuardManifest> {
+  const assetsDir = getAssetsDir();
+  const manifestPath = path.join(assetsDir, 'skills', 'comet', ENTERPRISE_GUARD_MANIFEST_FILE);
+  const raw = await readFile(manifestPath, 'utf8');
+  return JSON.parse(raw) as EnterpriseGuardManifest;
+}
+
+export async function readPublishedRuntimeFiles(
+  manifest: EnterpriseGuardManifest,
+): Promise<Record<string, Buffer>> {
+  const assetsDir = getAssetsDir();
+  const files: Record<string, Buffer> = {};
+  for (const [key, entry] of Object.entries(manifest.files)) {
+    const relPath =
+      key === 'opencodePlugin'
+        ? path.join('skills', 'comet', 'plugins', entry.fileName)
+        : path.join('skills', 'comet', 'scripts', entry.fileName);
+    const filePath = path.join(assetsDir, relPath);
+    files[key] = await readFile(filePath);
+  }
+  return files;
+}
+
+export async function ensureManagedRuntimeReady(storageRoot?: string): Promise<{
+  versionDir: string;
+  manifest: EnterpriseGuardManifest;
+}> {
+  const manifest = await readPublishedEnterpriseGuardManifest();
+  const sourceFiles = await readPublishedRuntimeFiles(manifest);
+  const prepared = await hookLifecycleDependencies.prepareManagedRuntimeVersion({
+    storageRoot,
+    sourceManifest: manifest,
+    sourceFiles,
+  });
+  await hookLifecycleDependencies.activateManagedRuntimeVersion(manifest.version, { storageRoot });
+  return { versionDir: prepared.versionDir, manifest };
+}
+
 export const hookLifecycleDependencies = {
   installManagedHooksForPlatform,
   removeManagedHooksForPlatform,
   inspectManagedHooksForPlatform,
+  prepareManagedRuntimeVersion,
+  activateManagedRuntimeVersion,
+  inspectManagedRuntime,
+  cleanUnusedManagedRuntimeVersions,
+  ensureManagedRuntimeReady: async (storageRoot?: string) => {
+    try {
+      return await ensureManagedRuntimeReady(storageRoot);
+    } catch {
+      return null;
+    }
+  },
 };
 
 /** OpenCode auto-discovers .js plugins; .mjs files are silently ignored. */
@@ -87,7 +145,15 @@ async function installOpenCodeGuard(
     if (duplicate.length > 0) {
       return { status: 'failed', reason: 'another managed OpenCode Guard plugin already exists' };
     }
+    await hookLifecycleDependencies.ensureManagedRuntimeReady();
     await copyFile(paths.runnerSource, paths.runnerDestination);
+    if (process.platform !== 'win32') {
+      try {
+        await fs.chmod(paths.runnerDestination, 0o755);
+      } catch {
+        // ignore
+      }
+    }
     await copyFile(paths.pluginSource, paths.pluginDestination);
     return { status: 'installed' };
   } catch (error) {
@@ -242,6 +308,7 @@ export async function installEnterpriseGuard(
   if (usesEnterpriseGuardPlugin(platform)) {
     return installOpenCodeGuard(baseDir, platform, scope);
   }
+  await hookLifecycleDependencies.ensureManagedRuntimeReady();
   const gatewayConfig = enterpriseGatewayHookConfigForPlatform(platform);
   let install: HookInstallResult;
   try {
@@ -331,8 +398,10 @@ export async function removeEnterpriseGuard(
     scope,
     retiredEnterpriseHookConfigForPlatform(platform),
   );
-  return {
+  const result = {
     removed: gateway.removed + retired.removed,
     failed: gateway.failed + retired.failed,
   };
+  await hookLifecycleDependencies.cleanUnusedManagedRuntimeVersions().catch(() => []);
+  return result;
 }

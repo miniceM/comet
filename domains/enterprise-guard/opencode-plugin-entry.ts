@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,6 +26,27 @@ type OpenCodeHookOutput = {
 };
 
 function runnerPath(): string {
+  if (
+    process.env.COMET_ENTERPRISE_GUARD_RUNNER &&
+    existsSync(process.env.COMET_ENTERPRISE_GUARD_RUNNER)
+  ) {
+    return process.env.COMET_ENTERPRISE_GUARD_RUNNER;
+  }
+  try {
+    const storageRoot =
+      process.env.COMET_ENTERPRISE_GUARD_RUNTIME_ROOT ||
+      path.join(os.homedir(), '.comet', 'enterprise-guard');
+    const pointerFile = path.join(storageRoot, 'current.json');
+    if (existsSync(pointerFile)) {
+      const pointer = JSON.parse(readFileSync(pointerFile, 'utf8')) as { activePath?: string };
+      if (typeof pointer?.activePath === 'string') {
+        const candidate = path.join(pointer.activePath, 'comet-enterprise-runner.mjs');
+        if (existsSync(candidate)) return candidate;
+      }
+    }
+  } catch {
+    // Ignore and fallback
+  }
   const currentPath = fileURLToPath(import.meta.url);
   const currentDir = path.dirname(currentPath);
   for (const relativePath of [INSTALLED_RUNNER_RELATIVE_PATH, PUBLISHED_RUNNER_RELATIVE_PATH]) {

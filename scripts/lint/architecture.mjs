@@ -198,6 +198,9 @@ for (const [name, output] of Object.entries(layout.enterpriseGuardRuntime?.outpu
     fail(`enterprise guard runtime output "${name}" -> "${output}" is missing`);
   }
 }
+if (layout.enterpriseGuardRuntime?.manifest && !isFile(layout.enterpriseGuardRuntime.manifest)) {
+  fail(`enterprise guard runtime manifest "${layout.enterpriseGuardRuntime.manifest}" is missing`);
+}
 if (!isFile(layout.manifestPath)) {
   fail(`asset manifest "${layout.manifestPath}" is missing`);
 }
