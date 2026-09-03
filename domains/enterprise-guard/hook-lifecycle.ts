@@ -18,6 +18,18 @@ export const hookLifecycleDependencies = {
   inspectManagedHooksForPlatform,
 };
 
+export function enterpriseGatewayHookConfigForPlatform(
+  platform: Platform,
+): Record<string, HookConfig> {
+  return {
+    'comet/scripts/comet-enterprise-gateway.mjs': {
+      matcher: platform.hookMatcher ?? 'Write|Edit|Bash',
+      description: 'Enterprise Guard and Comet workflow enforcement',
+      arguments: ['--platform', platform.id],
+    },
+  };
+}
+
 export const enterpriseGatewayHookConfig: Record<string, HookConfig> = {
   'comet/scripts/comet-enterprise-gateway.mjs': {
     matcher: 'Write|Edit|Bash',
@@ -26,13 +38,15 @@ export const enterpriseGatewayHookConfig: Record<string, HookConfig> = {
   },
 };
 
-const RETIRED_ENTERPRISE_HOOK_CONFIG: Record<string, HookConfig> = {
-  'comet/scripts/comet-enterprise-hook.mjs': {
-    matcher: 'Write|Edit|Bash',
-    description: 'Enterprise Guard hard-rule enforcement',
-    arguments: ['--platform', 'claude'],
-  },
-};
+function retiredEnterpriseHookConfigForPlatform(platform: Platform): Record<string, HookConfig> {
+  return {
+    'comet/scripts/comet-enterprise-hook.mjs': {
+      matcher: platform.hookMatcher ?? 'Write|Edit|Bash',
+      description: 'Enterprise Guard hard-rule enforcement',
+      arguments: ['--platform', platform.id],
+    },
+  };
+}
 
 const ROUTER_HOOK_CONFIG: Record<string, HookConfig> = {
   'comet/scripts/comet-hook-router.mjs': {
@@ -41,13 +55,15 @@ const ROUTER_HOOK_CONFIG: Record<string, HookConfig> = {
   },
 };
 
-const RETIRED_MANAGED_HOOK_CONFIGS: Record<string, HookConfig> = {
-  ...RETIRED_ENTERPRISE_HOOK_CONFIG,
-  ...ROUTER_HOOK_CONFIG,
-};
+function retiredManagedHookConfigsForPlatform(platform: Platform): Record<string, HookConfig> {
+  return {
+    ...retiredEnterpriseHookConfigForPlatform(platform),
+    ...ROUTER_HOOK_CONFIG,
+  };
+}
 
 function supportsEnterpriseGuard(platform: Platform): boolean {
-  return platform.hookFormat === 'claude-code' && usesEnterpriseGuardGateway(platform);
+  return Boolean(platform.supportsHooks) && usesEnterpriseGuardGateway(platform);
 }
 
 function unsupportedPlatformReason(platform: Platform): string {
@@ -62,13 +78,14 @@ export async function installEnterpriseGuard(
   if (!supportsEnterpriseGuard(platform)) {
     return { status: 'skipped', reason: unsupportedPlatformReason(platform) };
   }
+  const gatewayConfig = enterpriseGatewayHookConfigForPlatform(platform);
   let install: HookInstallResult;
   try {
     install = await hookLifecycleDependencies.installManagedHooksForPlatform(
       baseDir,
       platform,
       scope,
-      enterpriseGatewayHookConfig,
+      gatewayConfig,
       { allowGlobal: true },
     );
   } catch (err) {
@@ -82,7 +99,7 @@ export async function installEnterpriseGuard(
       baseDir,
       platform,
       scope,
-      RETIRED_MANAGED_HOOK_CONFIGS,
+      retiredManagedHookConfigsForPlatform(platform),
     );
   } catch {
     cleanup = { removed: 0, failed: 1 };
@@ -103,18 +120,19 @@ export async function inspectEnterpriseGuard(
   scope: InstallScope,
 ): Promise<HookInspectionResult> {
   if (!supportsEnterpriseGuard(platform)) return { present: false };
+  const gatewayConfig = enterpriseGatewayHookConfigForPlatform(platform);
   const gateway = await hookLifecycleDependencies.inspectManagedHooksForPlatform(
     baseDir,
     platform,
     scope,
-    enterpriseGatewayHookConfig,
+    gatewayConfig,
   );
   if (gateway.error) return gateway;
   const retired = await hookLifecycleDependencies.inspectManagedHooksForPlatform(
     baseDir,
     platform,
     scope,
-    RETIRED_MANAGED_HOOK_CONFIGS,
+    retiredManagedHookConfigsForPlatform(platform),
   );
   if (retired.error) {
     if (retired.present || retired.managedPresent) return { ...gateway, legacyPresent: true };
@@ -130,17 +148,18 @@ export async function removeEnterpriseGuard(
   scope: InstallScope,
 ): Promise<RemovalResult> {
   if (!supportsEnterpriseGuard(platform)) return { removed: 0, failed: 0 };
+  const gatewayConfig = enterpriseGatewayHookConfigForPlatform(platform);
   const gateway = await hookLifecycleDependencies.removeManagedHooksForPlatform(
     baseDir,
     platform,
     scope,
-    enterpriseGatewayHookConfig,
+    gatewayConfig,
   );
   const retired = await hookLifecycleDependencies.removeManagedHooksForPlatform(
     baseDir,
     platform,
     scope,
-    RETIRED_ENTERPRISE_HOOK_CONFIG,
+    retiredEnterpriseHookConfigForPlatform(platform),
   );
   return {
     removed: gateway.removed + retired.removed,

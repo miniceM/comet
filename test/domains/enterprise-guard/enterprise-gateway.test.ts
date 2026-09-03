@@ -183,14 +183,14 @@ describe('Enterprise Guard composite gateway', () => {
   it('treats whitelisted platforms without a Guard codec as usage errors', async () => {
     const inspectRouter = vi.fn();
     const output = await executeEnterpriseGateway(
-      ['--platform', 'codex'],
+      ['--platform', 'windsurf'],
       JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'rm -rf /' } }),
       { inspectRouter },
     );
     expect(output.exitCode).toBe(64);
     expect(output.stdout).toBe('');
     expect(output.stderr).toContain(
-      'Enterprise Guard input codec is unavailable for platform: codex',
+      'Enterprise Guard input codec is unavailable for platform: windsurf',
     );
     expect(inspectRouter).not.toHaveBeenCalled();
   });

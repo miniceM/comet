@@ -1,6 +1,6 @@
 # Enterprise Guard 覆盖能力报告
 
-> 版本：v1.3 · 最后更新：2026-09-01 · 对应 [Issue #5](https://github.com/miniceM/comet/issues/5)
+> 版本：v1.4 · 最后更新：2026-09-02 · 对应 [Issue #15](https://github.com/miniceM/comet/issues/15)、[Issue #5](https://github.com/miniceM/comet/issues/5)
 
 ## 结论
 
@@ -10,23 +10,25 @@ Claude Code 的本地 Guard 拦截 `Write`、`Edit`、`Bash`，由单一 `comet-
 
 ## 平台覆盖
 
-| 平台               | 安装范围       | 拦截工具          | 阻断保证                                   | 降级路径           |
-| ------------------ | -------------- | ----------------- | ------------------------------------------ | ------------------ |
-| Claude Code        | 项目或用户本地 | Write、Edit、Bash | 尽力阻断（本地 Gateway）                   | 规则注入 + CI 兜底 |
-| OpenCode           | 规则目录       | —                 | 不提供 Enterprise Guard Hook（插件未安装） | 规则注入 + CI 兜底 |
-| Codex              | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
-| Windsurf           | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
-| GitHub Copilot     | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
-| Gemini CLI         | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
-| Grok               | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
-| Amazon Q Developer | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
-| Qwen Code          | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
-| Kiro               | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
-| CodeBuddy          | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
-| WorkBuddy          | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
-| Qoder              | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
-| Trae               | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
-| Trae CN            | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
+| 平台                   | 安装范围       | 拦截工具          | 阻断保证                                   | 降级路径           |
+| ---------------------- | -------------- | ----------------- | ------------------------------------------ | ------------------ |
+| Claude Code            | 项目或用户本地 | Write、Edit、Bash | 尽力阻断（本地 Gateway）                   | 规则注入 + CI 兜底 |
+| OpenCode               | 规则目录       | —                 | 不提供 Enterprise Guard Hook（插件未安装） | 规则注入 + CI 兜底 |
+| Codex                  | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
+| Windsurf               | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
+| GitHub Copilot         | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
+| Gemini CLI             | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
+| Grok                   | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
+| Amazon Q Developer     | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
+| Qwen Code              | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
+| Kiro                   | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
+| CodeBuddy              | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
+| WorkBuddy              | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
+| Qoder                  | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
+| Trae                   | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
+| Trae CN                | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
+| Oh My Pi               | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
+| DeepSeek Harness (dsh) | 规则目录       | —                 | 不提供 Enterprise Guard Hook               | 规则注入 + CI 兜底 |
 
 ## Doctor 与生命周期
 
