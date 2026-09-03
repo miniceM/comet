@@ -22,6 +22,9 @@ if (report.status === 'blocked') {
 }
 ```
 
-## L7 baseline integrity
+## L7 baseline integrity 与 CI 自动消费
 
-CI 必须运行 `pnpm run lint:enterprise-guard`。该检查以 [baseline](contracts/enterprise-guard-baseline.v1.json) 为事实来源，验证规则目录、JSON Schema、独立策略/reader 源码与已发布 Hook bundle 对同一组版本和规则 ID 达成一致。任何基线、例外读取器、策略或生成物不一致都必须以非零退出码失败，不能静默降级。
+CI 必须运行 `pnpm run lint:enterprise-guard`。该检查同时执行以下两项任务：
+
+1. **基线与契约完整性**：以 [baseline](contracts/enterprise-guard-baseline.v1.json) 为事实来源，验证规则目录、JSON Schema、独立策略/reader 源码与已发布 Hook bundle 对同一组版本和规则 ID 达成一致；同时断言 Git 原生边界 (`domains/enterprise-guard/git-boundary.ts`) 与 CI 消费端 (`scripts/lint/check-enterprise-findings.mjs`) 均完整实现。
+2. **自动化 Findings 审查**：自动调用 `node scripts/lint/check-enterprise-findings.mjs`。若工作区内存在未解决 HARD findings 或审计链损坏，CI 立即以非零状态码阻断，确保未经授权的违规变更无法合入主线。

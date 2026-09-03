@@ -55,6 +55,7 @@
     "build:entry-runtime": "node scripts/build/build-entry-runtime.mjs",
     "build:enterprise-guard-runtime": "node scripts/build/build-enterprise-guard-runtime.mjs",
     "check:generated": "node scripts/build/build-classic-runtime.mjs --check && node scripts/build/build-native-runtime.mjs --check && node scripts/build/build-entry-runtime.mjs --check && node scripts/build/build-enterprise-guard-runtime.mjs --check",
+    "check:enterprise-guard": "node scripts/lint/check-enterprise-findings.mjs",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:native-parallel": "vitest run test/domains/comet-native/native-parallel-worktree.test.ts",

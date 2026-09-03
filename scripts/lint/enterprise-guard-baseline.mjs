@@ -90,8 +90,14 @@ if (baseline && Array.isArray(baseline.ruleIds)) {
   }
 }
 
+const gitBoundary = readText('domains/enterprise-guard/git-boundary.ts');
+const checkFindings = readText('scripts/lint/check-enterprise-findings.mjs');
+
 requireText(findings, baseline?.findingSchemaVersion ?? '', 'findings writer');
 requireText(exceptionReader, 'readEnterpriseExceptions', 'exception reader');
+requireText(gitBoundary, 'evaluatePreCommit', 'git boundary pre-commit');
+requireText(gitBoundary, 'evaluatePrePush', 'git boundary pre-push');
+requireText(checkFindings, 'readEnterpriseFindings', 'CI findings consumer');
 requireText(reviewProtocol, 'readEnterpriseFindings', 'L4 review protocol');
 requireText(reviewProtocol, '/sdd-review', 'L4 review protocol');
 requireText(reviewProtocol, 'pnpm run lint:enterprise-guard', 'L7 review protocol');
@@ -105,6 +111,8 @@ if (
   !packageJson ||
   packageJson.scripts?.['lint:enterprise-guard'] !==
     'node scripts/lint/enterprise-guard-baseline.mjs' ||
+  packageJson.scripts?.['check:enterprise-guard'] !==
+    'node scripts/lint/check-enterprise-findings.mjs' ||
   typeof packageJson.scripts?.lint !== 'string' ||
   !packageJson.scripts.lint.includes('pnpm run lint:enterprise-guard')
 ) {
@@ -117,4 +125,14 @@ if (errors.length > 0) {
   process.exitCode = 1;
 } else {
   console.log('Enterprise Guard baseline integrity passed.');
+  try {
+    const { execFileSync } = await import('node:child_process');
+    execFileSync(
+      process.execPath,
+      ['scripts/lint/check-enterprise-findings.mjs', '--root', repositoryRoot],
+      { stdio: 'inherit' },
+    );
+  } catch {
+    process.exitCode = 1;
+  }
 }
