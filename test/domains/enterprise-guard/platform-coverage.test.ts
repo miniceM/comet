@@ -42,7 +42,7 @@ describe('Enterprise Guard platform coverage', () => {
     }
   });
 
-  it('separates host capability from verified enforcement', () => {
+  it('separates host capability and registered input codec from verified enforcement', () => {
     expect(enterpriseGuardPlatformProfile({ id: 'claude' })).toEqual({
       platformId: 'claude',
       host: 'command-hook',
@@ -53,6 +53,40 @@ describe('Enterprise Guard platform coverage', () => {
       coveredTools: ['Write', 'Edit', 'Bash'],
       orderingGuarantee: 'unknown',
     });
+
+    expect(enterpriseGuardPlatformProfile({ id: 'qwen' })).toEqual({
+      platformId: 'qwen',
+      host: 'command-hook',
+      inputCodec: 'qwen',
+      decisionCodec: 'comet-command-hook',
+      installStrategy: 'not-installed',
+      enforcement: 'none',
+      coveredTools: ['write_file', 'edit_file', 'execute_command', 'Write', 'Edit', 'Bash'],
+      orderingGuarantee: 'unknown',
+    });
+
+    expect(enterpriseGuardPlatformProfile({ id: 'gemini' })).toEqual({
+      platformId: 'gemini',
+      host: 'command-hook',
+      inputCodec: 'gemini',
+      decisionCodec: 'comet-command-hook',
+      installStrategy: 'not-installed',
+      enforcement: 'none',
+      coveredTools: ['WriteFile', 'EditFile', 'Shell'],
+      orderingGuarantee: 'unknown',
+    });
+
+    expect(enterpriseGuardPlatformProfile({ id: 'github-copilot' })).toEqual({
+      platformId: 'github-copilot',
+      host: 'command-hook',
+      inputCodec: 'copilot',
+      decisionCodec: 'copilot-json',
+      installStrategy: 'not-installed',
+      enforcement: 'none',
+      coveredTools: ['editFiles', 'runCommand', 'applyPatch'],
+      orderingGuarantee: 'unknown',
+    });
+
     expect(enterpriseGuardPlatformProfile({ id: 'opencode' })).toMatchObject({
       host: 'plugin-hook',
       inputCodec: 'opencode',

@@ -7,11 +7,13 @@ All notable changes to @rpamis/comet will be documented in this file.
 ### Added
 
 - **Enterprise Guard for OpenCode**: `comet init` and `comet update` now install an auto-discovered managed OpenCode plugin bridge and Runner. Bash commands are evaluated before execution to block high-risk operations such as embedded credentials or private keys, filesystem-root recursive deletion, and force-push commands. `comet doctor --repair` restores missing or outdated managed files, while uninstall removes only Comet-owned files and preserves user plugins and configuration.
+- **Enterprise Guard Gateway protocol suite**: Extended the unified Composite Gateway across verified command-hook platforms (Codex, Amazon Q Developer, Qwen Code, Gemini CLI, GitHub Copilot, Trae, Trae CN, Oh My Pi, DeepSeek Harness) with dedicated input codecs, secondary deserialization, and decision rendering, automatically retiring legacy dual Hooks while preserving user custom configurations.
 - **Enterprise Guard for Claude Code**: `comet init` and `comet update` now install one managed `PreToolUse` Gateway that evaluates high-risk writes, embedded credentials or private keys, filesystem-root recursive deletion, and force-push commands before Comet workflow routing. Guard evaluation and required audit persistence fail closed, `comet doctor --repair` restores missing project or user-local runtimes before retiring legacy Hooks, uninstall preserves user entries, and coverage reports peer-Hook ordering limits as best-effort with CI fallback.
 - **Enterprise Guard audit integrity**: Guard findings are now redacted, append safely under concurrent Hooks, and expose a schema-validated reader for review and CI consumers; corruption or a recorded hard denial blocks review.
 
 ### Changed
 
+- **Enterprise Guard platform profiles and lifecycle**: Generalised hook lifecycle management to discover platform profiles dynamically, supporting multi-platform composite gateway installation, inspection, and idempotent cleanup across supported toolsets.
 - **Enterprise Guard policy contract**: Claude Guard evaluation now emits versioned per-rule results for bounded write and shell inspection, fails closed on incomplete input, supports time-bounded approved exceptions, and verifies source, contract, and published runtime alignment in CI.
 
 ### Fixed

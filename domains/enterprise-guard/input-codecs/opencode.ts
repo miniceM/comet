@@ -7,8 +7,8 @@ import {
 import {
   boundedJson,
   boundedString,
-  capturedRawInput,
   isRecord,
+  rawInput,
   truncationField,
   type JsonRecord,
 } from './shared.js';
@@ -43,7 +43,7 @@ const READ_ONLY_OPENCODE_TOOLS = new Set(['glob', 'grep', 'ls', 'read', 'view', 
 
 /** Convert OpenCode tool.execute.before JSON into the EnterpriseHookInput v1 contract. */
 export function parseOpenCodePluginInput(source: string): EnterpriseHookInput {
-  const raw = capturedRawInput(source);
+  const raw = rawInput(source);
   const fields = [raw.field];
   let parsed: JsonRecord = {};
   let parse: EnterpriseHookInput['parse'] = { status: 'complete', errors: [] };

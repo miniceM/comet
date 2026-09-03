@@ -2,7 +2,7 @@ import {
   MAX_ENTERPRISE_HOOK_FIELD_BYTES,
   MAX_ENTERPRISE_HOOK_INPUT_BYTES,
 } from '../normalized-event.js';
-import type { CapturedJson, CapturedString } from '../normalized-event.js';
+import type { CapturedJson, CapturedString, EnterpriseHookInput } from '../normalized-event.js';
 
 export type TruncationField = {
   path: string;
@@ -57,7 +57,7 @@ export function truncationField(
   };
 }
 
-export function capturedRawInput(source: string): {
+export function rawInput(source: string): {
   source: string;
   field: TruncationField;
 } {
@@ -72,4 +72,56 @@ export function capturedRawInput(source: string): {
       truncated: bytes.length > MAX_ENTERPRISE_HOOK_INPUT_BYTES,
     },
   };
+}
+
+const WRITE_TOOL_CANONICAL_NAMES = new Set([
+  'write',
+  'writefile',
+  'writefiles',
+  'write_file',
+  'writefiletool',
+  'create',
+  'createfile',
+  'createfiles',
+  'create_file',
+  'edit',
+  'editfile',
+  'editfiles',
+  'edit_file',
+  'strreplaceeditor',
+  'str_replace_editor',
+  'searchreplace',
+  'search_replace',
+  'applypatch',
+  'apply_patch',
+  'patch',
+]);
+
+export function isNormalizedWriteTool(name: string | null): boolean {
+  if (!name) return false;
+  const normalized = name.toLowerCase().replace(/[^a-z0-9]+/gu, '');
+  return WRITE_TOOL_CANONICAL_NAMES.has(normalized);
+}
+
+export function detectWriteOperation(
+  toolName: string | null,
+): EnterpriseHookInput['writes'][number]['operation'] {
+  if (!toolName) return 'unknown';
+  const lower = toolName.toLowerCase();
+  if (
+    lower.includes('create') ||
+    lower === 'write' ||
+    lower === 'writefile' ||
+    lower === 'writefiles' ||
+    lower === 'write_file'
+  ) {
+    return 'create';
+  }
+  if (lower.includes('edit') || lower.includes('replace') || lower.includes('patch')) {
+    return 'edit';
+  }
+  if (lower.includes('delete') || lower.includes('remove')) {
+    return 'delete';
+  }
+  return 'unknown';
 }

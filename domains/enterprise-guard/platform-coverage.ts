@@ -39,7 +39,7 @@ export function enterpriseGuardCoverage(platform: Pick<Platform, 'id'>): Enterpr
   return {
     level,
     installationScope: enforced || gatewayInstalled ? 'project or user-local' : 'rules only',
-    enforcedTools: profile.coveredTools,
+    enforcedTools: enforced || gatewayInstalled ? profile.coveredTools : [],
     fallback:
       profile.enforcement === 'best-effort' && profile.installStrategy === 'composite-gateway'
         ? 'local Gateway + rules injection + CI fallback; peer Hook ordering is not final'
