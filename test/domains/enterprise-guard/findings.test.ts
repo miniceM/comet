@@ -70,4 +70,53 @@ describe('enterprise guard findings', () => {
       integrityErrors: [expect.stringContaining('line 1')],
     });
   });
+
+  it('returns clear status when no findings file exists', async () => {
+    const report = await readEnterpriseFindings(projectRoot);
+    expect(report.status).toBe('clear');
+    expect(report.findings).toEqual([]);
+    expect(report.integrityErrors).toEqual([]);
+  });
+
+  it('returns warn status when only soft warning findings exist', async () => {
+    const target = enterpriseFindingsFile(projectRoot);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    const softFinding = {
+      schemaVersion: 'comet.enterprise-finding.v1',
+      createdAt: new Date().toISOString(),
+      ruleId: 'EG-SOFT-SECRET-002',
+      ruleVersion: 1,
+      enforcement: 'soft',
+      decision: 'warn',
+      tool: 'Write',
+      path: 'src/token.ts',
+      fingerprint: 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      exceptionId: null,
+    };
+    await fs.writeFile(target, `${JSON.stringify(softFinding)}\n`, 'utf8');
+
+    const report = await readEnterpriseFindings(projectRoot);
+    expect(report.status).toBe('warn');
+    expect(report.findings).toHaveLength(1);
+    expect(report.integrityErrors).toEqual([]);
+  });
+
+  it('detects schema mismatches as integrity errors', async () => {
+    const target = enterpriseFindingsFile(projectRoot);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    const invalidFinding = {
+      schemaVersion: 'comet.enterprise-finding.v1',
+      createdAt: new Date().toISOString(),
+      ruleId: 'INVALID-RULE-FORMAT',
+      ruleVersion: 1,
+      enforcement: 'hard',
+      decision: 'deny',
+    };
+    await fs.writeFile(target, `${JSON.stringify(invalidFinding)}\n`, 'utf8');
+
+    const report = await readEnterpriseFindings(projectRoot);
+    expect(report.status).toBe('blocked');
+    expect(report.integrityErrors).toHaveLength(1);
+    expect(report.integrityErrors[0]).toContain('line 1');
+  });
 });

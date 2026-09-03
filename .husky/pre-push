@@ -1,0 +1,1 @@
+node scripts/lint/git-pre-push.mjs

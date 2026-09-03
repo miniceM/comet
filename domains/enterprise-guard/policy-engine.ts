@@ -49,7 +49,7 @@ const PRIVATE_KEY = /-----BEGIN(?: [A-Z0-9]{1,40})? PRIVATE KEY-----/u;
 const SECRET_ASSIGNMENT =
   /\b(?:api[_-]?key|access[_-]?key|secret|token|password)\b\s*=\s*[^\s'"`]{8,}/iu;
 const RULE_VERSION = 1;
-const DEFAULT_PROTECTED_BRANCHES = new Set(['main', 'master']);
+export const DEFAULT_PROTECTED_BRANCHES = new Set(['main', 'master']);
 
 function sha256(value: string): string {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`;
@@ -99,7 +99,7 @@ function isBashTool(name: string | null): boolean {
   return name === 'Bash';
 }
 
-function isEnvironmentFile(value: string): boolean {
+export function isEnvironmentFile(value: string): boolean {
   const normalized = value.replaceAll('\\', '/').toLowerCase();
   const basename = normalized.slice(normalized.lastIndexOf('/') + 1);
   return (
@@ -114,7 +114,7 @@ function isExamplePlaceholder(value: string): boolean {
   );
 }
 
-function containsHardSecret(value: string): boolean {
+export function containsHardSecret(value: string): boolean {
   if (AWS_ACCESS_KEY.test(value) || PRIVATE_KEY.test(value)) return true;
   const assignment = value.match(
     /\b(?:api[_-]?key|access[_-]?key|secret|token|password)\b\s*=\s*([^\s'"`]+)/iu,
@@ -124,7 +124,7 @@ function containsHardSecret(value: string): boolean {
   );
 }
 
-function containsSoftSecret(value: string): boolean {
+export function containsSoftSecret(value: string): boolean {
   return SECRET_ASSIGNMENT.test(value) && !containsHardSecret(value);
 }
 
