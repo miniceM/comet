@@ -188,11 +188,15 @@ for (const [name, output] of Object.entries(layout.entryRuntime?.outputs ?? {}))
     fail(`entry resolver runtime output "${name}" -> "${output}" is missing`);
   }
 }
-if (!isFile(layout.enterpriseGuardRuntime?.entry ?? '')) {
-  fail(`enterprise guard runtime entry "${layout.enterpriseGuardRuntime?.entry}" is missing`);
+for (const [name, entry] of Object.entries(layout.enterpriseGuardRuntime?.entries ?? {})) {
+  if (!isFile(entry)) {
+    fail(`enterprise guard runtime entry "${name}" -> "${entry}" is missing`);
+  }
 }
-if (!isFile(layout.enterpriseGuardRuntime?.output ?? '')) {
-  fail(`enterprise guard runtime output "${layout.enterpriseGuardRuntime?.output}" is missing`);
+for (const [name, output] of Object.entries(layout.enterpriseGuardRuntime?.outputs ?? {})) {
+  if (!isFile(output)) {
+    fail(`enterprise guard runtime output "${name}" -> "${output}" is missing`);
+  }
 }
 if (!isFile(layout.manifestPath)) {
   fail(`asset manifest "${layout.manifestPath}" is missing`);
@@ -256,6 +260,8 @@ for (const file of walkFiles('.', ignoredGeneratedTrees, ignoredGeneratedRelativ
     normalized.startsWith('scripts/') ||
     normalized.startsWith('test/') ||
     normalized.startsWith('assets/skills/comet/scripts/') ||
+    normalized.startsWith('assets/skills/comet/plugins/') ||
+    normalized.startsWith('assets/skills-zh/comet/plugins/') ||
     normalized.startsWith('assets/skills/comet-native/scripts/') ||
     normalized.startsWith('eval/local/skills/') ||
     allowedCodeFiles.has(normalized) ||

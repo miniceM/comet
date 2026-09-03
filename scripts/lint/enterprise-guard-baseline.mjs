@@ -48,6 +48,8 @@ const policyEngine = readText('domains/enterprise-guard/policy-engine.ts');
 const findings = readText('domains/enterprise-guard/findings.ts');
 const exceptionReader = readText('domains/enterprise-guard/exceptions.ts');
 const gatewayBundle = readText('assets/skills/comet/scripts/comet-enterprise-gateway.mjs');
+const runnerBundle = readText('assets/skills/comet/scripts/comet-enterprise-runner.mjs');
+const pluginBundle = readText('assets/skills/comet/plugins/comet-enterprise-guard.mjs');
 const reviewProtocol = readText('docs/architecture/enterprise-guard/review-consumption.md');
 const packageJson = readJson('package.json');
 
@@ -84,6 +86,7 @@ if (baseline && Array.isArray(baseline.ruleIds)) {
     requireText(policy, ruleId, 'policy catalog');
     requireText(policyEngine, ruleId, 'policy engine');
     requireText(gatewayBundle, ruleId, 'published Hook bundle');
+    requireText(runnerBundle, ruleId, 'published Runner bundle');
   }
 }
 
@@ -92,6 +95,11 @@ requireText(exceptionReader, 'readEnterpriseExceptions', 'exception reader');
 requireText(reviewProtocol, 'readEnterpriseFindings', 'L4 review protocol');
 requireText(reviewProtocol, '/sdd-review', 'L4 review protocol');
 requireText(reviewProtocol, 'pnpm run lint:enterprise-guard', 'L7 review protocol');
+requireText(
+  pluginBundle,
+  'comet.enterprise-managed-opencode-guard.v1',
+  'published OpenCode plugin bundle',
+);
 
 if (
   !packageJson ||

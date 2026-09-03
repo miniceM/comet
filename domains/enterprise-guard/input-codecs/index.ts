@@ -2,12 +2,14 @@ import type { EnterpriseGuardInputCodec, EnterpriseHookInput } from '../normaliz
 import { claudeEnterpriseGuardCodec, parseClaudeEnterpriseHookInput } from './claude.js';
 import { copilotEnterpriseGuardCodec, parseCopilotEnterpriseHookInput } from './copilot.js';
 import { geminiEnterpriseGuardCodec, parseGeminiEnterpriseHookInput } from './gemini.js';
+import { opencodeEnterpriseGuardCodec } from './opencode.js';
 import { parseQwenEnterpriseHookInput, qwenEnterpriseGuardCodec } from './qwen.js';
 
 export {
   claudeEnterpriseGuardCodec,
   copilotEnterpriseGuardCodec,
   geminiEnterpriseGuardCodec,
+  opencodeEnterpriseGuardCodec,
   qwenEnterpriseGuardCodec,
   parseClaudeEnterpriseHookInput,
   parseCopilotEnterpriseHookInput,
@@ -20,6 +22,7 @@ const BASE_CODECS: readonly EnterpriseGuardInputCodec[] = [
   qwenEnterpriseGuardCodec,
   geminiEnterpriseGuardCodec,
   copilotEnterpriseGuardCodec,
+  opencodeEnterpriseGuardCodec,
 ];
 
 // Mapping from platformId / codecId to the input parsing function
@@ -39,6 +42,7 @@ const PLATFORM_CODEC_RESOLVERS = new Map<string, (source: string) => EnterpriseH
   ['gemini', geminiEnterpriseGuardCodec.parse],
   ['github-copilot', copilotEnterpriseGuardCodec.parse],
   ['copilot', copilotEnterpriseGuardCodec.parse],
+  ['opencode', opencodeEnterpriseGuardCodec.parse],
 ]);
 
 // Also register base codecs by their codec ID

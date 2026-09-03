@@ -135,6 +135,6 @@ describe('enterprise guard design baseline', () => {
     expect(coverageReport).toContain('不抵御能够修改本地 Hook、配置或脚本的恶意主体');
     expect(matrix).toContain('Claude Code 已完成 Gateway 生命周期 Spike');
     expect(matrix).toContain('同级 Hook 并行执行');
-    expect(matrix).toContain('其他平台仍不属于强制阻断覆盖');
+    expect(matrix).toContain('其他平台不会因内部能力档案或抽象升级而自动宣称强制阻断');
   });
 });

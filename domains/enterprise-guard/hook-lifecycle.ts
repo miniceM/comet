@@ -1,6 +1,12 @@
+import { readFile, readdir } from 'fs/promises';
+import path from 'path';
+
+import { copyFile, removeFile } from '../../platform/fs/file-system.js';
 import type { Platform } from '../../platform/install/platforms.js';
+import { getPlatformSkillsDir } from '../../platform/install/platforms.js';
 import type { InstallScope } from '../../platform/install/types.js';
 import {
+  getAssetsDir,
   installManagedHooksForPlatform,
   type HookConfig,
   type HookInstallResult,
@@ -10,13 +16,165 @@ import {
   type HookInspectionResult,
 } from '../skill/platform-inspect.js';
 import { removeManagedHooksForPlatform, type RemovalResult } from '../skill/uninstall.js';
-import { enterpriseGuardCoverage, usesEnterpriseGuardGateway } from './platform-coverage.js';
+import {
+  enterpriseGuardCoverage,
+  usesEnterpriseGuardGateway,
+  usesEnterpriseGuardPlugin,
+} from './platform-coverage.js';
 
 export const hookLifecycleDependencies = {
   installManagedHooksForPlatform,
   removeManagedHooksForPlatform,
   inspectManagedHooksForPlatform,
 };
+
+/** OpenCode auto-discovers .js plugins; .mjs files are silently ignored. */
+export const OPENCODE_PLUGIN_FILE = 'comet-enterprise-guard.js';
+const OPENCODE_PLUGIN_ASSET_FILE = 'comet-enterprise-guard.mjs';
+export const OPENCODE_RUNNER_FILE = 'comet-enterprise-runner.mjs';
+export const OPENCODE_PLUGIN_MARKER = 'comet.enterprise-managed-opencode-guard.v1';
+
+function opencodePluginPaths(baseDir: string, platform: Platform, scope: InstallScope) {
+  const platformBase = path.join(baseDir, getPlatformSkillsDir(platform, scope));
+  const assetsDir = getAssetsDir();
+  return {
+    pluginSource: path.join(assetsDir, 'skills', 'comet', 'plugins', OPENCODE_PLUGIN_ASSET_FILE),
+    runnerSource: path.join(assetsDir, 'skills', 'comet', 'scripts', OPENCODE_RUNNER_FILE),
+    runnerDestination: path.join(platformBase, 'skills', 'comet', 'scripts', OPENCODE_RUNNER_FILE),
+    pluginDestination: path.join(platformBase, 'plugins', OPENCODE_PLUGIN_FILE),
+  };
+}
+
+async function readPluginFile(filePath: string): Promise<string | null> {
+  try {
+    return await readFile(filePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function managedPluginFiles(directory: string): Promise<string[]> {
+  try {
+    const entries = await readdir(directory, { withFileTypes: true });
+    const managed: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const content = await readPluginFile(path.join(directory, entry.name));
+      if (content?.includes(OPENCODE_PLUGIN_MARKER)) managed.push(path.join(directory, entry.name));
+    }
+    return managed;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+async function installOpenCodeGuard(
+  baseDir: string,
+  platform: Platform,
+  scope: InstallScope,
+): Promise<HookInstallResult> {
+  const paths = opencodePluginPaths(baseDir, platform, scope);
+  try {
+    const existing = await readPluginFile(paths.pluginDestination);
+    if (existing && !existing.includes(OPENCODE_PLUGIN_MARKER)) {
+      return { status: 'failed', reason: 'managed plugin path contains a user-owned plugin' };
+    }
+    const duplicate = (await managedPluginFiles(path.dirname(paths.pluginDestination))).filter(
+      (filePath) => filePath !== paths.pluginDestination,
+    );
+    if (duplicate.length > 0) {
+      return { status: 'failed', reason: 'another managed OpenCode Guard plugin already exists' };
+    }
+    await copyFile(paths.runnerSource, paths.runnerDestination);
+    await copyFile(paths.pluginSource, paths.pluginDestination);
+    return { status: 'installed' };
+  } catch (error) {
+    return { status: 'failed', reason: (error as Error).message };
+  }
+}
+
+async function inspectOpenCodeGuard(
+  baseDir: string,
+  platform: Platform,
+  scope: InstallScope,
+): Promise<HookInspectionResult> {
+  const paths = opencodePluginPaths(baseDir, platform, scope);
+  try {
+    const plugin = await readPluginFile(paths.pluginDestination);
+    const managedElsewhere = (await managedPluginFiles(path.dirname(paths.pluginDestination))).some(
+      (filePath) => filePath !== paths.pluginDestination,
+    );
+    if (!plugin && !managedElsewhere) {
+      return { present: false };
+    }
+    const reasons: string[] = [];
+    const runner = await readPluginFile(paths.runnerDestination);
+    const pluginSource = await readPluginFile(paths.pluginSource);
+    const runnerSource = await readPluginFile(paths.runnerSource);
+    if (!plugin) {
+      reasons.push('managed plugin missing');
+    } else if (!plugin.includes(OPENCODE_PLUGIN_MARKER)) {
+      return {
+        present: false,
+        managedPresent: true,
+        duplicatePresent: managedElsewhere,
+        error: 'managed plugin path contains a user-owned plugin',
+      };
+    } else if (pluginSource !== null && plugin !== pluginSource) {
+      reasons.push('outdated managed plugin runtime');
+    }
+    if (!runner) reasons.push('managed runner missing');
+    else if (runnerSource !== null && runner !== runnerSource) {
+      reasons.push('outdated managed runner runtime');
+    }
+    if (managedElsewhere) reasons.push('duplicate managed OpenCode Guard plugin remains');
+    if (reasons.length > 0) {
+      return {
+        present: Boolean(plugin?.includes(OPENCODE_PLUGIN_MARKER)),
+        managedPresent: true,
+        duplicatePresent: managedElsewhere,
+        error: reasons.join('; '),
+      };
+    }
+    return { present: true };
+  } catch (error) {
+    return { present: false, managedPresent: true, error: (error as Error).message };
+  }
+}
+
+async function removeOpenCodeGuard(
+  baseDir: string,
+  platform: Platform,
+  scope: InstallScope,
+): Promise<RemovalResult> {
+  const paths = opencodePluginPaths(baseDir, platform, scope);
+  try {
+    const plugin = await readPluginFile(paths.pluginDestination);
+    if (!plugin) return { removed: 0, failed: 0 };
+    if (!plugin.includes(OPENCODE_PLUGIN_MARKER)) {
+      return {
+        removed: 0,
+        failed: 1,
+        reason: 'managed plugin path contains a user-owned plugin',
+      };
+    }
+    const pluginRemoved = await removeFile(paths.pluginDestination);
+    const runnerRemoved = await removeManagedRunner(paths);
+    return { removed: (pluginRemoved ? 1 : 0) + (runnerRemoved ? 1 : 0), failed: 0 };
+  } catch (error) {
+    return { removed: 0, failed: 1, reason: (error as Error).message };
+  }
+}
+
+async function removeManagedRunner(paths: Awaited<ReturnType<typeof opencodePluginPaths>>) {
+  const runner = await readPluginFile(paths.runnerDestination);
+  if (!runner) return false;
+  const runnerSource = await readPluginFile(paths.runnerSource);
+  if (runnerSource !== null && runner !== runnerSource) return false;
+  return removeFile(paths.runnerDestination);
+}
 
 export function enterpriseGatewayHookConfigForPlatform(
   platform: Platform,
@@ -63,7 +221,10 @@ function retiredManagedHookConfigsForPlatform(platform: Platform): Record<string
 }
 
 function supportsEnterpriseGuard(platform: Platform): boolean {
-  return Boolean(platform.supportsHooks) && usesEnterpriseGuardGateway(platform);
+  return (
+    usesEnterpriseGuardPlugin(platform) ||
+    (Boolean(platform.supportsHooks) && usesEnterpriseGuardGateway(platform))
+  );
 }
 
 function unsupportedPlatformReason(platform: Platform): string {
@@ -77,6 +238,9 @@ export async function installEnterpriseGuard(
 ): Promise<HookInstallResult> {
   if (!supportsEnterpriseGuard(platform)) {
     return { status: 'skipped', reason: unsupportedPlatformReason(platform) };
+  }
+  if (usesEnterpriseGuardPlugin(platform)) {
+    return installOpenCodeGuard(baseDir, platform, scope);
   }
   const gatewayConfig = enterpriseGatewayHookConfigForPlatform(platform);
   let install: HookInstallResult;
@@ -120,6 +284,9 @@ export async function inspectEnterpriseGuard(
   scope: InstallScope,
 ): Promise<HookInspectionResult> {
   if (!supportsEnterpriseGuard(platform)) return { present: false };
+  if (usesEnterpriseGuardPlugin(platform)) {
+    return inspectOpenCodeGuard(baseDir, platform, scope);
+  }
   const gatewayConfig = enterpriseGatewayHookConfigForPlatform(platform);
   const gateway = await hookLifecycleDependencies.inspectManagedHooksForPlatform(
     baseDir,
@@ -148,6 +315,9 @@ export async function removeEnterpriseGuard(
   scope: InstallScope,
 ): Promise<RemovalResult> {
   if (!supportsEnterpriseGuard(platform)) return { removed: 0, failed: 0 };
+  if (usesEnterpriseGuardPlugin(platform)) {
+    return removeOpenCodeGuard(baseDir, platform, scope);
+  }
   const gatewayConfig = enterpriseGatewayHookConfigForPlatform(platform);
   const gateway = await hookLifecycleDependencies.removeManagedHooksForPlatform(
     baseDir,

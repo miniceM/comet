@@ -1424,6 +1424,41 @@ describe('doctor command', () => {
     });
   });
 
+  it('reports one healthy managed OpenCode Guard plugin and repairable damage', async () => {
+    const opencode = PLATFORMS.find((platform) => platform.id === 'opencode');
+    expect(opencode).toBeDefined();
+    await installManagedCometSkills(tmpDir, '.opencode');
+    await copyCometRulesForPlatform(tmpDir, opencode!, true, 'zh', 'project');
+    await installEnterpriseGuard(tmpDir, opencode!, 'project');
+
+    const healthy = await collectDoctorResults(tmpDir);
+    expect(
+      healthy.find((result) => result.check === 'enterprise guard plugin: OpenCode (project)'),
+    ).toMatchObject({
+      status: 'pass',
+      message: 'single managed OpenCode guard plugin present',
+    });
+
+    const runnerPath = path.join(
+      tmpDir,
+      '.opencode',
+      'skills',
+      'comet',
+      'scripts',
+      'comet-enterprise-runner.mjs',
+    );
+    await fs.rm(runnerPath);
+    const damaged = await collectDoctorResults(tmpDir);
+    const check = damaged.find(
+      (result) => result.check === 'enterprise guard plugin: OpenCode (project)',
+    );
+    expect(check).toMatchObject({
+      status: 'warn',
+      message: expect.stringContaining('managed Enterprise Guard runner missing'),
+    });
+    expect(check?.message).toContain('comet doctor --repair --scope project');
+  });
+
   it('reports rules injection and CI fallback for a non-enforced Hook platform', async () => {
     const codex = PLATFORMS.find((platform) => platform.id === 'codex');
     expect(codex).toBeDefined();

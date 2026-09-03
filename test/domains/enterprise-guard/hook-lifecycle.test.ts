@@ -23,11 +23,13 @@ describe('enterprise guard managed Hook lifecycle', () => {
   let temporaryRoot: string;
   const claude = PLATFORMS.find((platform) => platform.id === 'claude');
   const codex = PLATFORMS.find((platform) => platform.id === 'codex');
+  const opencode = PLATFORMS.find((platform) => platform.id === 'opencode');
 
   beforeEach(async () => {
     temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'comet-enterprise-guard-'));
     expect(claude).toBeDefined();
     expect(codex).toBeDefined();
+    expect(opencode).toBeDefined();
   });
 
   afterEach(async () => {
@@ -243,5 +245,131 @@ describe('enterprise guard managed Hook lifecycle', () => {
       failed: 0,
     });
     await expect(fs.access(path.join(temporaryRoot, '.codex', 'hooks.json'))).rejects.toThrow();
+  });
+
+  describe('OpenCode managed plugin', () => {
+    function pluginsDir(): string {
+      return path.join(temporaryRoot, '.opencode', 'plugins');
+    }
+
+    function pluginPath(): string {
+      return path.join(pluginsDir(), 'comet-enterprise-guard.js');
+    }
+
+    function runnerPath(): string {
+      return path.join(
+        temporaryRoot,
+        '.opencode',
+        'skills',
+        'comet',
+        'scripts',
+        'comet-enterprise-runner.mjs',
+      );
+    }
+
+    it('installs one auto-discovered managed plugin without replacing user plugins', async () => {
+      if (!opencode) throw new Error('OpenCode platform fixture is missing');
+      await fs.mkdir(pluginsDir(), { recursive: true });
+      await fs.writeFile(path.join(pluginsDir(), 'user-guard.mjs'), 'export {};\n', 'utf8');
+
+      for (let index = 0; index < 2; index++) {
+        await expect(installEnterpriseGuard(temporaryRoot, opencode, 'project')).resolves.toEqual({
+          status: 'installed',
+        });
+      }
+
+      const plugin = await fs.readFile(pluginPath(), 'utf8');
+      await expect(fs.readFile(runnerPath(), 'utf8')).resolves.toContain('EG-HARD-GIT-001');
+      expect(plugin).toContain('comet.enterprise-managed-opencode-guard.v1');
+      expect(plugin).toContain('tool.execute.before');
+      expect(plugin).toContain('comet-enterprise-runner.mjs');
+      await expect(fs.readFile(path.join(pluginsDir(), 'user-guard.mjs'), 'utf8')).resolves.toBe(
+        'export {};\n',
+      );
+      await expect(
+        fs.access(path.join(temporaryRoot, '.opencode', 'opencode.json')),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(inspectEnterpriseGuard(temporaryRoot, opencode, 'project')).resolves.toEqual({
+        present: true,
+      });
+    });
+
+    it('preserves a user-owned file occupying the managed plugin path', async () => {
+      if (!opencode) throw new Error('OpenCode platform fixture is missing');
+      await fs.mkdir(pluginsDir(), { recursive: true });
+      await fs.writeFile(pluginPath(), 'export const userPlugin = true;\n', 'utf8');
+
+      await expect(installEnterpriseGuard(temporaryRoot, opencode, 'project')).resolves.toEqual({
+        status: 'failed',
+        reason: 'managed plugin path contains a user-owned plugin',
+      });
+      await expect(
+        inspectEnterpriseGuard(temporaryRoot, opencode, 'project'),
+      ).resolves.toMatchObject({
+        present: false,
+        managedPresent: true,
+        error: 'managed plugin path contains a user-owned plugin',
+      });
+      await expect(removeEnterpriseGuard(temporaryRoot, opencode, 'project')).resolves.toEqual({
+        removed: 0,
+        failed: 1,
+        reason: 'managed plugin path contains a user-owned plugin',
+      });
+      await expect(fs.readFile(pluginPath(), 'utf8')).resolves.toBe(
+        'export const userPlugin = true;\n',
+      );
+    });
+
+    it('does not read or write the project OpenCode config', async () => {
+      if (!opencode) throw new Error('OpenCode platform fixture is missing');
+      await fs.mkdir(path.join(temporaryRoot, '.opencode'), { recursive: true });
+      const configPath = path.join(temporaryRoot, '.opencode', 'opencode.json');
+      const config = '{ "model": "local/model", "plugin": ["user-guard.mjs"] }\n';
+      await fs.writeFile(configPath, config, 'utf8');
+
+      await expect(installEnterpriseGuard(temporaryRoot, opencode, 'project')).resolves.toEqual({
+        status: 'installed',
+      });
+      await expect(fs.readFile(configPath, 'utf8')).resolves.toBe(config);
+    });
+
+    it('reports damaged, outdated, or duplicate managed runtimes for repair', async () => {
+      if (!opencode) throw new Error('OpenCode platform fixture is missing');
+      await installEnterpriseGuard(temporaryRoot, opencode, 'project');
+      await fs.writeFile(runnerPath(), 'export {};\n', 'utf8');
+      await fs.writeFile(
+        path.join(pluginsDir(), 'another-comet-guard.mjs'),
+        '// comet.enterprise-managed-opencode-guard.v1\nexport {};\n',
+        'utf8',
+      );
+
+      await expect(
+        inspectEnterpriseGuard(temporaryRoot, opencode, 'project'),
+      ).resolves.toMatchObject({
+        present: true,
+        managedPresent: true,
+        duplicatePresent: true,
+        error: expect.stringContaining('outdated managed runner runtime'),
+      });
+    });
+
+    it('uninstalls only managed plugin artifacts and keeps user plugins', async () => {
+      if (!opencode) throw new Error('OpenCode platform fixture is missing');
+      await installEnterpriseGuard(temporaryRoot, opencode, 'project');
+      await fs.writeFile(path.join(pluginsDir(), 'user-guard.mjs'), 'export {};\n', 'utf8');
+
+      await expect(removeEnterpriseGuard(temporaryRoot, opencode, 'project')).resolves.toEqual({
+        removed: 2,
+        failed: 0,
+      });
+      await expect(fs.access(pluginPath())).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(fs.access(runnerPath())).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(fs.readFile(path.join(pluginsDir(), 'user-guard.mjs'), 'utf8')).resolves.toBe(
+        'export {};\n',
+      );
+      await expect(inspectEnterpriseGuard(temporaryRoot, opencode, 'project')).resolves.toEqual({
+        present: false,
+      });
+    });
   });
 });

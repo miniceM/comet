@@ -4,6 +4,13 @@ import {
 } from '../normalized-event.js';
 import type { CapturedJson, CapturedString, EnterpriseHookInput } from '../normalized-event.js';
 
+export type TruncationField = {
+  path: string;
+  capturedBytes: number;
+  originalBytes: number;
+  truncated: boolean;
+};
+
 export type JsonRecord = Record<string, unknown>;
 
 export function isRecord(value: unknown): value is JsonRecord {
@@ -38,7 +45,10 @@ export function boundedJson(value: unknown): CapturedJson {
   };
 }
 
-export function truncationField(fieldPath: string, value: CapturedString | CapturedJson) {
+export function truncationField(
+  fieldPath: string,
+  value: CapturedString | CapturedJson,
+): TruncationField {
   return {
     path: fieldPath,
     capturedBytes: value.capturedBytes,
@@ -49,7 +59,7 @@ export function truncationField(fieldPath: string, value: CapturedString | Captu
 
 export function rawInput(source: string): {
   source: string;
-  field: ReturnType<typeof truncationField>;
+  field: TruncationField;
 } {
   const bytes = Buffer.from(source, 'utf8');
   const captured = bytes.subarray(0, MAX_ENTERPRISE_HOOK_INPUT_BYTES);
