@@ -534,25 +534,25 @@ does not expand the backend command list; see the [Skill creation guide](docs/op
 
 `comet init` installs skills for the selected workflow. Native depends only on Comet-owned skills; Classic additionally installs OpenSpec and Superpowers.
 
-### Comet / SDD Skills
+### Comet Skills
 
 <details>
-<summary>View Skills (SDD Mapping)</summary>
+<summary>View Comet skills (SDD Mapping)</summary>
 
-| Skill (SDD / Comet Mapping) | Description                                                                                  |
+| Skill (SDD Mapping) | Description                                                                                  |
 | ---------------- | -------------------------------------------------------------------------------------------- |
-| `/sdd` (`/comet`)         | Shared entry — routes to the configured Native or Classic workflow from `.comet/config.yaml` |
-| `/sdd-native` (`/comet-native`)  | Permanent Native entry — self-contained, recoverable Shape, Build, Verify, and Archive       |
-| `/sdd-classic` (`/comet-classic`) | Permanent Classic entry — the five-phase OpenSpec + Superpowers workflow                     |
-| `/sdd-review` (`/comet-review`)  | Read-only manual review of the current Native or Classic change without advancing its phase  |
-| `/sdd-open` (`/comet-open`)    | Classic phase 1: Open a change (proposal, design, task breakdown)                            |
-| `/sdd-design` (`/comet-design`)  | Classic phase 2: Deep design (brainstorming, Design Doc)                                     |
-| `/sdd-build` (`/comet-build`)   | Classic phase 3: Plan and build (implementation plan, code commits)                          |
-| `/sdd-verify` (`/comet-verify`)  | Classic phase 4: Verify and finish (testing, verification report)                            |
-| `/sdd-archive` (`/comet-archive`) | Classic phase 5: Archive (delta spec sync, status annotation)                                |
-| `/sdd-hotfix` (`/comet-hotfix`)  | Classic preset: Quick bug fix                                                                 |
-| `/sdd-tweak` (`/comet-tweak`)   | Classic preset: OpenSpec-chained medium change                                                |
-| `/sdd-any` (`/comet-any`)     | Comet Skill Creator — Create or optimize a reusable Skill                                    |
+| `/comet` (SDD: `/sdd`)         | Shared entry — routes to the configured Native or Classic workflow from `.comet/config.yaml` |
+| `/comet-native` (SDD: `/sdd-native`)  | Permanent Native entry — self-contained, recoverable Shape, Build, Verify, and Archive       |
+| `/comet-classic` (SDD: `/sdd-classic`) | Permanent Classic entry — the five-phase OpenSpec + Superpowers workflow                     |
+| `/comet-review` (SDD: `/sdd-review`)  | Read-only manual review of the current Native or Classic change without advancing its phase  |
+| `/comet-open` (SDD: `/sdd-open`)    | Classic phase 1: Open a change (proposal, design, task breakdown)                            |
+| `/comet-design` (SDD: `/sdd-design`)  | Classic phase 2: Deep design (brainstorming, Design Doc)                                     |
+| `/comet-build` (SDD: `/sdd-build`)   | Classic phase 3: Plan and build (implementation plan, code commits)                          |
+| `/comet-verify` (SDD: `/sdd-verify`)  | Classic phase 4: Verify and finish (testing, verification report)                            |
+| `/comet-archive` (SDD: `/sdd-archive`) | Classic phase 5: Archive (delta spec sync, status annotation)                                |
+| `/comet-hotfix` (SDD: `/sdd-hotfix`)  | Classic preset: Quick bug fix                                                                 |
+| `/comet-tweak` (SDD: `/sdd-tweak`)   | Classic preset: OpenSpec-chained medium change                                                |
+| `/comet-any` (SDD: `/sdd-any`)     | Comet Skill Creator — Create or optimize a reusable Skill                                    |
 
 </details>
 

@@ -503,25 +503,25 @@ comet eval ./my-skill --suite langsmith --html
 
 `comet init` 会按所选工作流安装技能：Native 只依赖 Comet 原生技能，Classic 会额外安装 OpenSpec 与 Superpowers。
 
-### Comet / SDD 技能
+### Comet 技能
 
 <details>
 <summary>查看技能列表（SDD 映射）</summary>
 
-| 技能（SDD / Comet 映射） | 描述                                                                          |
+| 技能（SDD 映射） | 描述                                                                          |
 | ---------------- | ----------------------------------------------------------------------------- |
-| `/sdd` (`/comet`)         | 共享入口 — 根据 `.comet/config.yaml` 转发到项目配置的 Native 或 Classic       |
-| `/sdd-native` (`/comet-native`)  | Native 永久入口 — Shape、Build、Verify、Archive，自包含且可恢复               |
-| `/sdd-classic` (`/comet-classic`) | Classic 永久入口 — OpenSpec + Superpowers 五阶段工作流                        |
-| `/sdd-review` (`/comet-review`)  | 手动只读审查当前 Native 或 Classic change，不推进阶段也不替代 Verify          |
-| `/sdd-open` (`/comet-open`)    | Classic 阶段 1：打开变更（提案、设计、任务分解）                              |
-| `/sdd-design` (`/comet-design`)  | Classic 阶段 2：深度设计（头脑风暴、设计文档）                                |
-| `/sdd-build` (`/comet-build`)   | Classic 阶段 3：规划与构建（实现计划、代码提交）                              |
-| `/sdd-verify` (`/comet-verify`)  | Classic 阶段 4：验证与完成（测试、验证报告）                                  |
-| `/sdd-archive` (`/comet-archive`) | Classic 阶段 5：归档（delta spec 同步、状态标注）                             |
-| `/sdd-hotfix` (`/comet-hotfix`)  | Classic 快捷路径：快速 bug 修复                                                |
-| `/sdd-tweak` (`/comet-tweak`)   | Classic 轻量路径：串联 OpenSpec 的中等改动                                     |
-| `/sdd-any` (`/comet-any`)     | Comet Skill Creator：创建或优化可复用 Skill                                   |
+| `/comet` (SDD: `/sdd`)         | 共享入口 — 根据 `.comet/config.yaml` 转发到项目配置的 Native 或 Classic       |
+| `/comet-native` (SDD: `/sdd-native`)  | Native 永久入口 — Shape、Build、Verify、Archive，自包含且可恢复               |
+| `/comet-classic` (SDD: `/sdd-classic`) | Classic 永久入口 — OpenSpec + Superpowers 五阶段工作流                        |
+| `/comet-review` (SDD: `/sdd-review`)  | 手动只读审查当前 Native 或 Classic change，不推进阶段也不替代 Verify          |
+| `/comet-open` (SDD: `/sdd-open`)    | Classic 阶段 1：打开变更（提案、设计、任务分解）                              |
+| `/comet-design` (SDD: `/sdd-design`)  | Classic 阶段 2：深度设计（头脑风暴、设计文档）                                |
+| `/comet-build` (SDD: `/sdd-build`)   | Classic 阶段 3：规划与构建（实现计划、代码提交）                              |
+| `/comet-verify` (SDD: `/sdd-verify`)  | Classic 阶段 4：验证与完成（测试、验证报告）                                  |
+| `/comet-archive` (SDD: `/sdd-archive`) | Classic 阶段 5：归档（delta spec 同步、状态标注）                             |
+| `/comet-hotfix` (SDD: `/sdd-hotfix`)  | Classic 快捷路径：快速 bug 修复                                                |
+| `/comet-tweak` (SDD: `/sdd-tweak`)   | Classic 轻量路径：串联 OpenSpec 的中等改动                                     |
+| `/comet-any` (SDD: `/sdd-any`)     | Comet Skill Creator：创建或优化可复用 Skill                                   |
 
 </details>
 
